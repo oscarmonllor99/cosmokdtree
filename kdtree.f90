@@ -32,7 +32,13 @@
 !   on the fly during the search by shifting the elements, just like
 !   in the k-nearest neighbour search.
 !
-! - 
+! - Makefile
+!
+! - Periodic boundary conditions
+!
+! - Better parallelism for tree building (if possible)
+!
+! - Better neighbour search (e.g. binary search, or heap...)
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 !#######################################################
