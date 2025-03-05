@@ -9,7 +9,7 @@
 ! Brief description:
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! - This module implements an optimized parallel kd-tree construction and 
-!   search for k-nearest neighbours and points within a given radius.
+!   search for k-nearest neighbors and points within a given radius.
 !
 ! - Quickselect is used to find the point that splits the space
 !   in two halves along a given axis (median). Use of median ensures 
@@ -17,28 +17,20 @@
 !
 ! - The tree is built recursively, with the splitting axis changing
 !   at each level (x, y, z, x, y, z, ...). The tree is built in parallel 
-!   using OpenMP tasks.
+!   using OpenMP tasks due to Divide and Conquer nature of the algorithm.
 !
-! - The search for k-nearest neighbours uses an insertion shiftdown 
+! - The search for k-nearest neighbors uses an insertion shiftdown 
 !   too quickly sort and replace the nearest neighbours found.
 !
 ! - quicksort is used to sort the distances and indices of    
 !   points within a given radius
+!
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! Pending improvements:
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-! - Quicksort may not be the most efficient way to sort the distances
-!   and indices of points within a given radius. They could be sorted
-!   on the fly during the search by shifting the elements, just like
-!   in the k-nearest neighbour search.
+! - knn-search relies on shiftdown to sort the distances and indices, which
+!   has O(k) complexity. This can be improved by using a priority queue (heap).
 !
-! - Makefile
-!
-! - Periodic boundary conditions
-!
-! - Better parallelism for tree building (if possible)
-!
-! - Better neighbour search (e.g. binary search, or heap...)
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 !#######################################################
@@ -113,8 +105,7 @@ contains
 
       ! Build KD-tree
       max_depth = 2 + compute_max_depth(omp_get_max_threads())
-      write(*,*) "Parallel max depth:", max_depth
-
+      
       ! Leafsize scaling with the number of points
       leafsize = int(real(n)**0.333 / 4.)
       leafsize = max(leafsize, 1)
@@ -221,24 +212,23 @@ contains
     ! Ensures all points below k are less than or equal to the k-th point
     ! and all points above k are greater than or equal to the k-th point with the
     ! specified axis.
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     subroutine quickselect(points, indices, k, axis, kth_point, kth_index)
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         implicit none
-        real, intent(inout) :: points(:, :)      ! 2D array of points (slice of the full array)
-        integer(kind=8), intent(inout) :: indices(:) ! 1D array of indices (slice of the full array)
+        real, intent(inout) :: points(:, :)      ! 2D array of points
+        integer(kind=8), intent(inout) :: indices(:) ! 1D array of indices
         integer(kind=8), intent(in) :: k         ! k-th smallest element to find
         integer, intent(in) :: axis             ! Axis to sort along (0 for x, 1 for y, 2 for z)
         real, intent(out) :: kth_point(size(points, 2))  ! The k-th smallest point
-        integer(kind=8), intent(out) :: kth_index        ! Index of the k-th smallest point (within the original array)
+        integer(kind=8), intent(out) :: kth_index        ! Index of the k-th smallest point
         integer(kind=8) :: left, right, pivot_index
-
+    
         left = 1
         right = size(points, 1, kind=8)
+    
         do while (left <= right)
             ! Partition the array and get the pivot index
             pivot_index = partition(points, indices, left, right, axis)
-
+    
             if (pivot_index == k) then
                 ! Found the k-th smallest element
                 kth_point = points(pivot_index, :)
@@ -252,63 +242,67 @@ contains
                 right = pivot_index - 1
             end if
         end do
-
+    
         ! If the loop ends, return the k-th element
         kth_point = points(k, :)
         kth_index = indices(k)
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     end subroutine quickselect
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 
     ! Partition function for Quickselect
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     function partition(points, indices, left, right, axis) result(pivot_index)
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         implicit none
-        real, intent(inout) :: points(:, :)      ! 2D array of points (slice of the full array)
-        integer(kind=8), intent(inout) :: indices(:) ! 1D array of indices (slice of the full array)
+        real, intent(inout) :: points(:, :)      ! 2D array of points
+        integer(kind=8), intent(inout) :: indices(:) ! 1D array of indices
         integer(kind=8), intent(in) :: left, right  ! Left and right bounds of the partition
         integer, intent(in) :: axis             ! Axis to sort along (0 for x, 1 for y, 2 for z)
         integer(kind=8) :: pivot_index, i, j
         real :: pivot_value, temp_point(size(points, 2))
         integer(kind=8) :: temp_index
-
-        ! Use middle element as pivot
-        pivot_value = points((left + right) / 2, axis + 1)
-
+    
+        ! Choose pivot as the middle element
+        pivot_index = (left + right) / 2
+        pivot_value = points(pivot_index, axis + 1)
+    
+        ! Move pivot to the end
+        call swap(points, indices, pivot_index, right)
+    
         i = left - 1
-
+    
+        ! Partition the array
         do j = left, right - 1
             if (points(j, axis + 1) <= pivot_value) then
                 i = i + 1
-                ! Swap points(i, :) and points(j, :)
-                temp_point = points(i, :)
-                points(i, :) = points(j, :)
-                points(j, :) = temp_point
-
-                ! Swap indices(i) and indices(j)
-                temp_index = indices(i)
-                indices(i) = indices(j)
-                indices(j) = temp_index
+                call swap(points, indices, i, j)
             end if
         end do
-
-        ! Swap points(i+1, :) and points(right, :)
-        temp_point = points(i + 1, :)
-        points(i + 1, :) = points(right, :)
-        points(right, :) = temp_point
-
-        ! Swap indices(i+1) and indices(right)
-        temp_index = indices(i + 1)
-        indices(i + 1) = indices(right)
-        indices(right) = temp_index
-
+    
+        ! Move pivot to its final position
+        call swap(points, indices, i + 1, right)
+    
         ! Return the pivot index
         pivot_index = i + 1
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     end function partition
+
+    subroutine swap(points, indices, i, j)
+        implicit none
+        real, intent(inout) :: points(:, :)
+        integer(kind=8), intent(inout) :: indices(:)
+        integer(kind=8), intent(in) :: i, j
+        real :: temp_point(size(points, 2))
+        integer(kind=8) :: temp_index
+    
+        ! Swap points
+        temp_point = points(i, :)
+        points(i, :) = points(j, :)
+        points(j, :) = temp_point
+    
+        ! Swap indices
+        temp_index = indices(i)
+        indices(i) = indices(j)
+        indices(j) = temp_index
+    end subroutine swap
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     !k-nearest neighbor search
@@ -355,6 +349,7 @@ contains
         integer(kind=8), intent(inout) :: idx(k) 
         integer :: i
         real :: dist_current, dist_kth
+        real :: epsilon = 1.e-6
         integer :: axis
         ! Temporary point for contiguous memory access
         real :: temp_point(3)
@@ -371,7 +366,7 @@ contains
                 dist_kth = dist(k)
 
                 ! If the current point is closer than the k-th best, update the list
-                if (dist_current < dist_kth) then
+                if (dist_current < dist_kth + epsilon) then
                     dist(k) = dist_current
                     idx(k) = node%leaf_indices(i)
                     call shift_knn(dist, idx, k)
@@ -385,28 +380,27 @@ contains
             dist_kth = dist(k)
 
             ! Update best points and indices if the current node is closer than the k-th best
-            if (dist_current < dist_kth) then
+            if (dist_current < dist_kth + epsilon) then
                 dist(k) = dist_current
                 idx(k) = node%index
                 call shift_knn(dist, idx, k)
             end if
 
-            axis = mod(depth, 3)  ! Determine the current axis (0 for x, 1 for y, 2 for z)
-
+            axis = node%axis
             ! Recursively search the subtree that contains the target
             if (target(axis+1) < node%point(axis+1)) then
                 call knn_search(node%left, depth + 1, target, dist, idx, k)
                 dist_kth = dist(k)
                 !Check if we need to search the right subtree 
                 !(dist_kth is still bigger than the distance to the splitting plane)
-                if (abs(target(axis+1) - node%point(axis+1)) < 2.*dist_kth) then
+                if (abs(target(axis+1) - node%point(axis+1)) < dist_kth) then
                     call knn_search(node%right, depth + 1, target, dist, idx, k)
                 end if
             else
                 call knn_search(node%right, depth + 1, target, dist, idx, k)
                 dist_kth = dist(k)
                 !Check if we need to search the right subtree (dist_kth is still bigger than the distance to the splitting plane)
-                if (abs(target(axis+1) - node%point(axis+1)) < 2.*dist_kth) then
+                if (abs(target(axis+1) - node%point(axis+1)) < dist_kth) then
                     call knn_search(node%left, depth + 1, target, dist, idx, k)
                 end if
             end if
@@ -463,24 +457,52 @@ contains
     real, intent(in) :: target(3)
     !local
     integer :: init_depth = 0
+    integer :: count_idx, count_dist, count ! Counters for the number of elements in idx and dist
+    integer(kind=8), allocatable :: temp_idx(:)
+    real, allocatable :: temp_dist(:)
     !out
     real, allocatable :: dist(:) ! Distance of the points within the radius
     integer(kind=8), allocatable :: idx(:) !index of the points within the radius
     type(KDTreeResult) :: query
 
-    call ball_search(node, init_depth, target, dist, idx, radius)
+    !Preallocate dist and idx
+    allocate(dist(1000))
+    allocate(idx(1000))
+    dist = HUGE(0.0)
+    idx = -1
+    count_dist = 0
+    count_idx = 0
 
-    ! No results found
-    if (.not. allocated(dist)) then
-        allocate(dist(0))
-        allocate(idx(0))
+    call ball_search(node, init_depth, target, dist, idx, radius, count_idx, count_dist)
+
+    !Check
+    if (count_idx .ne. count_dist) then
+        STOP "Error: count_idx and count_dist do not match!"
+    end if
+
+    if (.not. allocated(dist)) STOP 'dist and idx arrays are not allocated!'
+        
+    if (count_idx == 0) then
+        ! No points found
+        temp_dist = dist(1:0)
+        call move_alloc(temp_dist, dist)
+        temp_idx = idx(1:0)
+        call move_alloc(temp_idx, idx)
+
     else
+        ! Reallocation to the correct size
+        temp_dist = dist(1:count_dist)
+        call move_alloc(temp_dist, dist)
+        temp_idx = idx(1:count_idx)
+        call move_alloc(temp_idx, idx)
         ! Last step, sort the distances
         call quicksort(dist, idx, size(idx))
     end if
 
     query%idx = idx
     query%dist = dist
+
+    deallocate(dist, idx)
     
     contains
 
@@ -571,26 +593,30 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    recursive subroutine ball_search(node, depth, target, dist, idx, radius)
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    implicit none
-    !in
-    real :: radius ! Radius of the ball
-    type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
-    real, intent(in) :: target(3)                 ! Target point (3D)
-    integer, intent(in) :: depth     
-    !out
-    integer(kind=8), allocatable, intent(inout) :: idx(:)  ! Index of the points within the radius
-    real, allocatable, intent(inout) :: dist(:)
-    !local
-    integer :: i
-    real :: dist_current
-    integer :: axis
-    ! Temporary point for contiguous memory access
-    real :: temp_point(3)
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
+    recursive subroutine ball_search(node, depth, target, dist, idx, radius, count_idx, count_dist)
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
+        implicit none
+        !in
+        real :: radius ! Radius of the ball
+        type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
+        real, intent(in) :: target(3)                 ! Target point (3D)
+        integer, intent(in) :: depth     
+        !out
+        integer(kind=8), allocatable, intent(inout) :: idx(:)  ! Index of the points within the radius
+        real, allocatable, intent(inout) :: dist(:)
+        integer, intent(inout) :: count_idx, count_dist ! Counters for the number of elements in idx and dist
+        !local
+        integer :: i
+        real :: dist_current
+        integer :: axis
+        real :: epsilon = 1.e-6
+        ! Temporary point for contiguous memory access
+        real :: temp_point(3)
 
-    if (.not. associated(node)) return
+        if (.not. associated(node)) then
+            return
+        end if
 
         ! First, check if it is a leaf node
         if (node%is_leaf == 1) then
@@ -599,10 +625,11 @@ contains
             do i = 1, size(node%leaf_indices)
                 temp_point = node%leaf_points(i, :)
                 dist_current = distance(temp_point, target)
-                if ( dist_current <= radius ) then
+                ! if(count_dist.eq.0) write(*,*) radius, dist_current
+                if ( dist_current <= radius + epsilon ) then
                     ! Append the index to the list
-                    call int_add_to_list(idx, node%leaf_indices(i))
-                    call real_add_to_list(dist, dist_current)
+                    call int_add_to_list(idx, node%leaf_indices(i), count_idx)
+                    call real_add_to_list(dist, dist_current, count_dist)
                 end if
             end do
 
@@ -610,69 +637,83 @@ contains
 
             !Calculate this node distance
             dist_current = distance(node%point, target)
-
-            if (dist_current <= radius) then
-                call int_add_to_list(idx, node%index)
-                call real_add_to_list(dist, dist_current)
+            ! if(count_dist.eq.0) write(*,*) radius, dist_current
+            if (dist_current <= radius + epsilon) then
+                call int_add_to_list(idx, node%index, count_idx)
+                call real_add_to_list(dist, dist_current, count_dist)
             end if
 
-            axis = mod(depth, 3)  ! Determine the current axis (0 for x, 1 for y, 2 for z)
+            axis = node%axis
 
-            ! Recursively search the primary subtree
+            ! Recursively search
             if (target(axis+1) < node%point(axis+1)) then
-                call ball_search(node%left, depth + 1, target, dist, idx, radius)
+                call ball_search(node%left, depth + 1, target, dist, idx, radius, count_idx, count_dist)
                 ! Check if we need to search the other subtree
-                if (abs(target(axis+1) - node%point(axis+1)) <= 2.*radius) then
-                    call ball_search(node%right, depth + 1, target, dist, idx, radius)
+                if (abs(target(axis+1) - node%point(axis+1)) <= radius) then
+                    call ball_search(node%right, depth + 1, target, dist, idx, radius, count_idx, count_dist)
                 end if
             else
-                call ball_search(node%right, depth + 1, target, dist, idx, radius)
+                call ball_search(node%right, depth + 1, target, dist, idx, radius, count_idx, count_dist)
                 ! Check if we need to search the other subtree
-                if (abs(target(axis+1) - node%point(axis+1)) <= 2.*radius) then
-                    call ball_search(node%left, depth + 1, target, dist, idx, radius)
+                if (abs(target(axis+1) - node%point(axis+1)) <= radius) then
+                    call ball_search(node%left, depth + 1, target, dist, idx, radius, count_idx, count_dist)
                 end if
             end if
 
         endif
 
     contains
-        
+
         !subroutines to append an element to an array
-        subroutine int_add_to_list(indices, new_value)
+        subroutine int_add_to_list(indices, new_value, count)
             implicit none
             integer(kind=8), allocatable, intent(inout) :: indices(:)
             integer(kind=8), intent(in) :: new_value
+            integer, intent(inout) :: count
             integer(kind=8), allocatable :: temp(:)
             integer :: n
-        
+
             if (.not. allocated(indices)) then
-                allocate(indices(1))
+                ! Initial allocation with a reasonable size
+                allocate(indices(1000))
                 indices(1) = new_value
+                count = 1
             else
-                n = size(indices)
-                allocate(temp(n + 1))
-                temp(1:n) = indices
-                temp(n + 1) = new_value
-                call move_alloc(temp, indices)  ! Efficient memory transfer
+                if (count == size(indices)) then
+                    ! Resize the array
+                    n = size(indices)
+                    allocate(temp(10 * n))
+                    temp(1:n) = indices
+                    call move_alloc(temp, indices)
+                end if
+                count = count + 1
+                indices(count) = new_value
             end if
         end subroutine int_add_to_list
 
-        subroutine real_add_to_list(dist, new_value)
+        subroutine real_add_to_list(dist, new_value, count)
             implicit none
             real, allocatable, intent(inout) :: dist(:)
             real, intent(in) :: new_value
+            integer, intent(inout) :: count
             real, allocatable :: temp(:)
             integer :: n
-        
+
             if (.not. allocated(dist)) then
-                allocate(dist(1))
+                ! Initial allocation with a reasonable size
+                allocate(dist(1000))
                 dist(1) = new_value
+                count = 1
             else
-                n = size(dist)
-                allocate(temp(n + 1))
-                temp(1:n) = dist
-                temp(n + 1) = new_value
-                call move_alloc(temp, dist)  ! Efficient memory transfer
+                if (count == size(dist)) then
+                    ! Resize the array by doubling its size
+                    n = size(dist)
+                    allocate(temp(10 * n))
+                    temp(1:n) = dist
+                    call move_alloc(temp, dist)
+                end if
+                count = count + 1
+                dist(count) = new_value
             end if
         end subroutine real_add_to_list
 
@@ -713,7 +754,7 @@ program main
       type(KDTreeNode), pointer :: root
       type(KDTreeResult) :: query
       real, allocatable :: x(:), y(:), z(:)
-      real :: ttarget(3) = [50, 50, 50]  ! Target point in 3D
+      real :: ttarget(3) = [0, 0, 0]  ! Target point in 3D
       integer(kind=8) :: n, i, best_index
       integer :: k
       integer :: ncpu
@@ -745,9 +786,9 @@ program main
       call system_clock(t1,trate,tmax)
       allocate(x(n), y(n), z(n))
       do i = 1, n
-            x(i) = rand() * 100  ! Random x-coordinate
-            y(i) = rand() * 100  ! Random y-coordinate
-            z(i) = rand() * 100  ! Random z-coordinate
+            x(i) = (rand()-0.5) * 100  ! Random x-coordinate
+            y(i) = (rand()-0.5) * 100  ! Random y-coordinate
+            z(i) = (rand()-0.5) * 100  ! Random z-coordinate
       end do
       CALL system_clock(t2,trate,tmax)
       WRITE(*,*) "Time taken to generate random points:", float(t2 - t1)/1e3, "seconds"
@@ -759,40 +800,41 @@ program main
       call system_clock(t1,trate,tmax)
       WRITE(*,*) "Time taken to build KD-Tree:", float(t1 - t2)/1e3, "seconds"
   
-      ! Build the KD-Tree coretran
-      x_coretran = x
-      y_coretran = y
-      z_coretran = z
-      call system_clock(t1,trate,tmax)
-      tree_coretran = KDTREE(x_coretran, y_coretran, z_coretran)
-      call system_clock(t1,trate,tmax)
-      WRITE(*,*) "CORETRAN Time taken to build KD-Tree:", float(t1 - t2)/1e3, "seconds"
+    !   ! Build the KD-Tree coretran
+    !   x_coretran = x
+    !   y_coretran = y
+    !   z_coretran = z
+    !   call system_clock(t1,trate,tmax)
+    !   tree_coretran = KDTREE(x_coretran, y_coretran, z_coretran)
+    !   call system_clock(t1,trate,tmax)
+    !   WRITE(*,*) "CORETRAN Time taken to build KD-Tree:", float(t1 - t2)/1e3, "seconds"
   
 
       !KNN TEST
       ! Find the nearest neighbor
-      k = 64
+      k = 10000
       allocate(indices(k))
       call system_clock(t1,trate,tmax)
-      do i = 1, 1000000
-        query = knn_search_init(root, ttarget, k)
-      end do
+       do i = 1, 100
+      query = knn_search_init(root, ttarget, k)
+       end do
       call system_clock(t2,trate,tmax)
-      WRITE(*,*) "Time taken to find nearests neighbors:", float(t2 - t1)/1e3, "seconds"
+      WRITE(*,*) "Time taken to find nearests neighbors:", float(t2 - t1)/1e3/100., "seconds"
       indices = query%idx
       dist = query%dist
 
-      !CORETRAN KNN TEST
-      call system_clock(t1,trate,tmax)
-      do i = 1, 1000000
-        DA = SEARCH%KNEAREST(tree_coretran, x_coretran, y_coretran, z_coretran, &
-                XQUERY=DBLE(ttarget(1)), YQUERY=DBLE(ttarget(2)),  &
-                ZQUERY=DBLE(ttarget(3)), K=k)
-      end do
-      call system_clock(t2,trate,tmax)
-      indices_coretran = DA%I%VALUES
-      dist_coretran = DA%V%VALUES
-      WRITE(*,*) "CORETRAN Time taken to find nearests neighbors:", float(t2 - t1)/1e3, "seconds"
+
+    !   !CORETRAN KNN TEST
+    !   call system_clock(t1,trate,tmax)
+    !   do i = 1, 100
+    !     DA = SEARCH%KNEAREST(tree_coretran, x_coretran, y_coretran, z_coretran, &
+    !             XQUERY=DBLE(ttarget(1)), YQUERY=DBLE(ttarget(2)),  &
+    !             ZQUERY=DBLE(ttarget(3)), K=k)
+    !   end do
+    !   call system_clock(t2,trate,tmax)
+    !   indices_coretran = DA%I%VALUES
+    !   dist_coretran = DA%V%VALUES
+    !   WRITE(*,*) "CORETRAN Time taken to find nearests neighbors:", float(t2 - t1)/1e3/100., "seconds"
 
 
     !   !Check if all values are in 
@@ -801,26 +843,26 @@ program main
     !     write(*,*) indices(i), dist(i), indices_coretran(i), dist_coretran(i)
     !   end do
 
-    ! ! BALL SEARCH TEST
-    !   real_dists = sqrt((x - ttarget(1))**2 + (y - ttarget(2))**2 + (z - ttarget(3))**2)
-    !   call system_clock(t1,trate,tmax)
-    !   do i=1,1000000
-    !     query = ball_search_init(root, ttarget, 0.5)
-    !   end do
-    !   call system_clock(t2,trate,tmax)
-    !   WRITE(*,*) "Time taken to find points within the ball:", float(t2 - t1)/1e3, "seconds"
-    !   indices = query%idx
-    !   dist = query%dist
-    !   print *, "Points within the ball:", size(indices, 1)
+    ! BALL SEARCH TEST
+      real_dists = sqrt((x - ttarget(1))**2 + (y - ttarget(2))**2 + (z - ttarget(3))**2)
+      call system_clock(t1,trate,tmax)
+      do i=1,100
+        query = ball_search_init(root, ttarget, 10.)
+      end do
+      call system_clock(t2,trate,tmax)
+      WRITE(*,*) "Time taken to find points within the ball:", float(t2 - t1)/1e3/100., "seconds"
+      indices = query%idx
+      dist = query%dist
+      print *, "Points within the ball:", size(indices, 1)
 
     !   call system_clock(t1,trate,tmax)
-    !   do i=1,1000000
+    !   do i=1,100
     !   DA = SEARCH%KNEAREST(tree_coretran, x_coretran, y_coretran, z_coretran, &
     !                XQUERY=DBLE(ttarget(1)), YQUERY=DBLE(ttarget(2)),  &
-    !                ZQUERY=DBLE(ttarget(3)), RADIUS=DBLE(0.5))  
+    !                ZQUERY=DBLE(ttarget(3)), RADIUS=DBLE(0.01))  
     !   end do
     !   call system_clock(t2,trate,tmax)
-    !   WRITE(*,*) "CORETRAN Time taken to find points within the ball:", float(t2 - t1)/1e3, "seconds"
+    !   WRITE(*,*) "CORETRAN Time taken to find points within the ball:", float(t2 - t1)/1e3/100., "seconds"
     !   indices_coretran = DA%I%VALUES
     !   dist_coretran = DA%V%VALUES
     !   print *, "Coretran points within the ball:", size(indices_coretran)
