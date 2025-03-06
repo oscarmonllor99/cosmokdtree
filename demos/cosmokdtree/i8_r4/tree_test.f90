@@ -45,8 +45,8 @@ program main
     ! Build the KD-Tree
     call system_clock(t1,trate,tmax)
     root => build_kdtree_init(x, y, z)
-    call system_clock(t1,trate,tmax)
-    WRITE(*,*) "Time taken to build KD-Tree:", float(t1 - t2)/1e3, "seconds"
+    call system_clock(t2,trate,tmax)
+    WRITE(*,*) "Time taken to build KD-Tree:", float(t2 - t1)/1e3, "seconds"
 
 
     !KNN TEST
