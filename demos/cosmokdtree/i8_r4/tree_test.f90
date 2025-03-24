@@ -44,7 +44,7 @@ program main
     
     ! Build the KD-Tree
     call system_clock(t1,trate,tmax)
-    root => build_kdtree_init(x, y, z)
+    root => build_kdtree(x, y, z)
     call system_clock(t2,trate,tmax)
     WRITE(*,*) "Time taken to build KD-Tree:", float(t2 - t1)/1e3, "seconds"
 
@@ -55,7 +55,7 @@ program main
     allocate(indices(k))
     call system_clock(t1,trate,tmax)
      do i = 1, 100
-    query = knn_search_init(root, ttarget, k)
+    query = knn_search(root, ttarget, k)
      end do
     call system_clock(t2,trate,tmax)
     WRITE(*,*) "Time taken to find nearests neighbors:", float(t2 - t1)/1e3/100., "seconds"
@@ -68,7 +68,7 @@ program main
     real_dists = sqrt((x - ttarget(1))**2 + (y - ttarget(2))**2 + (z - ttarget(3))**2)
     call system_clock(t1,trate,tmax)
     do i=1,100
-      query = ball_search_init(root, ttarget, 10.)
+      query = ball_search(root, ttarget, 10.)
     end do
     call system_clock(t2,trate,tmax)
     WRITE(*,*) "Time taken to find points within the ball:", float(t2 - t1)/1e3/100., "seconds"

@@ -46,7 +46,7 @@ module cosmokdtree
 !#######################################################
     implicit none
     private  
-    public :: build_kdtree_init, KDTreeNode, KDTreeResult, knn_search_init, ball_search_init
+    public :: build_kdtree, KDTreeNode, KDTreeResult, knn_search, ball_search
     !+++++++++++++++++++++++++++++++
     !++++ Type definitions
     !+++++++++++++++++++++++++++++++
@@ -74,7 +74,7 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ! Initialize kd-tree construction
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    function build_kdtree_init(x, y, z) result(tree)
+    function build_kdtree(x, y, z) result(tree)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         use omp_lib
         implicit none
@@ -112,17 +112,17 @@ contains
         !$OMP END PARALLEL
 
         ! Build KD-tree
-        max_depth = 2 + compute_max_depth(omp_get_max_threads())
+        max_depth = compute_max_depth(omp_get_max_threads())
         
         ! Leafsize scaling with the number of points
         leafsize = int(real(n)**0.333 / 4.)
         leafsize = max(leafsize, 1)
 
-        tree => build_kdtree(points, indices, depth, max_depth, leafsize)
+        tree => build_kdtree_recursive(points, indices, depth, max_depth, leafsize)
 
         deallocate(points, indices)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    end function build_kdtree_init
+    end function build_kdtree
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -139,7 +139,7 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    recursive function build_kdtree(points,indices,depth,max_depth,leafsize) result(node)
+    recursive function build_kdtree_recursive(points,indices,depth,max_depth,leafsize) result(node)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     use omp_lib
     implicit none
@@ -191,28 +191,26 @@ contains
 
     ! Subtree construction (parallel at the top levels)
     if (depth < max_depth) then
-    !$OMP PARALLEL num_threads(2**(max_depth-depth))
+    !$OMP PARALLEL
     !$OMP SINGLE
 
     !$OMP TASK
-    node%left => build_kdtree(points(1:median-1,:),indices(1:median-1),depth+1,max_depth,leafsize)
+    node%left => build_kdtree_recursive(points(1:median-1,:),indices(1:median-1),depth+1,max_depth,leafsize)
     !$OMP END TASK
 
     !$OMP TASK
-    node%right => build_kdtree(points(median+1:,:),indices(median+1:),depth+1,max_depth,leafsize)
+    node%right => build_kdtree_recursive(points(median+1:,:),indices(median+1:),depth+1,max_depth,leafsize)
     !$OMP END TASK
 
-    ! Wait for the tasks to complete
-    !$OMP TASKWAIT
     !$OMP END SINGLE
     !$OMP END PARALLEL
     else
-    node%left => build_kdtree(points(1:median-1,:),indices(1:median-1),depth+1,max_depth,leafsize)
-    node%right => build_kdtree(points(median+1:,:),indices(median+1:),depth+1,max_depth,leafsize)
+    node%left => build_kdtree_recursive(points(1:median-1,:),indices(1:median-1),depth+1,max_depth,leafsize)
+    node%right => build_kdtree_recursive(points(median+1:,:),indices(median+1:),depth+1,max_depth,leafsize)
     end if
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    end function build_kdtree
+    end function build_kdtree_recursive
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -315,7 +313,7 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     !k-nearest neighbor search
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    function knn_search_init(node, target, k) result(query)
+    function knn_search(node, target, k) result(query)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         implicit none
         !in
@@ -333,18 +331,18 @@ contains
         dist = HUGE(0.0)
         idx = -1
 
-        call knn_search(node, init_depth, target, dist, idx, k)
+        call knn_search_recursive(node, init_depth, target, dist, idx, k)
 
         query%idx = idx
         query%dist = dist
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    endfunction knn_search_init
+    endfunction knn_search
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    recursive subroutine knn_search(node, depth, target, dist, idx, k)
+    recursive subroutine knn_search_recursive(node, depth, target, dist, idx, k)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         implicit none
         !in
@@ -397,19 +395,19 @@ contains
             axis = node%axis
             ! Recursively search the subtree that contains the target
             if (target(axis+1) < node%point(axis+1)) then
-                call knn_search(node%left, depth + 1, target, dist, idx, k)
+                call knn_search_recursive(node%left, depth + 1, target, dist, idx, k)
                 dist_kth = dist(k)
                 !Check if we need to search the right subtree 
                 !(dist_kth is still bigger than the distance to the splitting plane)
                 if (abs(target(axis+1) - node%point(axis+1)) < dist_kth) then
-                    call knn_search(node%right, depth + 1, target, dist, idx, k)
+                    call knn_search_recursive(node%right, depth + 1, target, dist, idx, k)
                 end if
             else
-                call knn_search(node%right, depth + 1, target, dist, idx, k)
+                call knn_search_recursive(node%right, depth + 1, target, dist, idx, k)
                 dist_kth = dist(k)
                 !Check if we need to search the right subtree (dist_kth is still bigger than the distance to the splitting plane)
                 if (abs(target(axis+1) - node%point(axis+1)) < dist_kth) then
-                    call knn_search(node%left, depth + 1, target, dist, idx, k)
+                    call knn_search_recursive(node%left, depth + 1, target, dist, idx, k)
                 end if
             end if
         end if
@@ -450,13 +448,13 @@ contains
             end subroutine shift_knn
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    end subroutine knn_search
+    end subroutine knn_search_recursive
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ! Search for points within a given radius
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    function ball_search_init(node, target, radius) result(query)
+    function ball_search(node, target, radius) result(query)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     implicit none
     !in
@@ -481,7 +479,7 @@ contains
     count_dist = 0
     count_idx = 0
 
-    call ball_search(node, init_depth, target, dist, idx, radius, count_idx, count_dist)
+    call ball_search_recursive(node, init_depth, target, dist, idx, radius, count_idx, count_dist)
 
     !Check
     if (count_idx .ne. count_dist) then
@@ -597,12 +595,12 @@ contains
         end subroutine partition2
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    end function ball_search_init
+    end function ball_search
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
-    recursive subroutine ball_search(node, depth, target, dist, idx, radius, count_idx, count_dist)
+    recursive subroutine ball_search_recursive(node, depth, target, dist, idx, radius, count_idx, count_dist)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
         implicit none
         !in
@@ -655,16 +653,16 @@ contains
 
             ! Recursively search
             if (target(axis+1) < node%point(axis+1)) then
-                call ball_search(node%left, depth + 1, target, dist, idx, radius, count_idx, count_dist)
+                call ball_search_recursive(node%left, depth + 1, target, dist, idx, radius, count_idx, count_dist)
                 ! Check if we need to search the other subtree
                 if (abs(target(axis+1) - node%point(axis+1)) <= radius) then
-                    call ball_search(node%right, depth + 1, target, dist, idx, radius, count_idx, count_dist)
+                    call ball_search_recursive(node%right, depth + 1, target, dist, idx, radius, count_idx, count_dist)
                 end if
             else
-                call ball_search(node%right, depth + 1, target, dist, idx, radius, count_idx, count_dist)
+                call ball_search_recursive(node%right, depth + 1, target, dist, idx, radius, count_idx, count_dist)
                 ! Check if we need to search the other subtree
                 if (abs(target(axis+1) - node%point(axis+1)) <= radius) then
-                    call ball_search(node%left, depth + 1, target, dist, idx, radius, count_idx, count_dist)
+                    call ball_search_recursive(node%left, depth + 1, target, dist, idx, radius, count_idx, count_dist)
                 end if
             end if
 
@@ -726,7 +724,7 @@ contains
         end subroutine real_add_to_list
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    end subroutine ball_search
+    end subroutine ball_search_recursive
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
