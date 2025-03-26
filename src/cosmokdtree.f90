@@ -390,6 +390,7 @@ contains
         real :: dist_current, dist_kth, d1d
         real :: epsilon = 1.e-6
         integer :: axis
+        integer :: look_opposite
         ! Temporary point for contiguous memory access
         real :: temp_point(3)
 
@@ -426,33 +427,34 @@ contains
             end if
 
             axis = node%axis
-            !1D distance from target to the splitting plane
+            ! 1D distance from target to the splitting plane
             d1d = targett(axis+1) - node%point(axis+1)
-
             ! Recursively search the subtree that contains the target
-#if periodic == 0
-
             if (d1d < 0) then
                 call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
                 dist_kth = dist(k)
                 !Check if we need to search the right subtree 
-                !(dist_kth is still bigger than the distance to the splitting plane)
-                if (abs(d1d) < dist_kth) then
+                look_opposite = 0
+                if (abs(d1d) < dist_kth) look_opposite = 1
+#if periodic == 1
+                if (targett(axis+1) - dist_kth <= -L(axis+1) / 2. ) look_opposite = 1
+#endif
+                if (look_opposite == 1) then
                     call knn_search_recursive(node%right, depth + 1, targett, dist, idx, k)
                 end if
             else
                 call knn_search_recursive(node%right, depth + 1, targett, dist, idx, k)
                 dist_kth = dist(k)
-                !Check if we need to search the right subtree (dist_kth is still bigger than the distance to the splitting plane)
-                if (abs(d1d) < dist_kth) then
+                !Check if we need to search the left subtree
+                if (abs(d1d) < dist_kth) look_opposite = 1
+#if periodic == 1
+                if (targett(axis+1) + dist_kth >= L(axis+1) / 2. ) look_opposite = 1
+#endif
+                if (look_opposite == 1) then
                     call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
                 end if
             end if
 
-#else
-
-
-#endif
 
         end if !node%is_leaf
 
@@ -658,9 +660,10 @@ contains
         integer, intent(inout) :: count_idx, count_dist ! Counters for the number of elements in idx and dist
         !local
         integer :: i
-        real :: dist_current
+        real :: dist_current, d1d
         integer :: axis
         real :: epsilon = 1.e-6
+        integer :: look_opposite
         ! Temporary point for contiguous memory access
         real :: temp_point(3)
 
@@ -675,7 +678,6 @@ contains
             do i = 1, size(node%leaf_indices)
                 temp_point = node%leaf_points(i, :)
                 dist_current = distance(temp_point, targett)
-                ! if(count_dist.eq.0) write(*,*) radius, dist_current
                 if ( dist_current <= radius + epsilon ) then
                     ! Append the index to the list
                     call int_add_to_list(idx, node%leaf_indices(i), count_idx)
@@ -687,25 +689,34 @@ contains
 
             !Calculate this node distance
             dist_current = distance(node%point, targett)
-            ! if(count_dist.eq.0) write(*,*) radius, dist_current
             if (dist_current <= radius + epsilon) then
                 call int_add_to_list(idx, node%index, count_idx)
                 call real_add_to_list(dist, dist_current, count_dist)
             end if
 
             axis = node%axis
-
-            ! Recursively search
+            ! 1D distance from target to the splitting plane
+            d1d = targett(axis+1) - node%point(axis+1)
+            ! Recursively search the subtree that contains the target
             if (targett(axis+1) < node%point(axis+1)) then
                 call ball_search_recursive(node%left, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 ! Check if we need to search the other subtree
-                if (abs(targett(axis+1) - node%point(axis+1)) <= radius) then
+                look_opposite = 0
+                if (abs(d1d) <= radius) look_opposite = 1
+#if periodic == 1
+                if (targett(axis+1) - radius <= -L(axis+1) / 2. ) look_opposite = 1
+#endif
+                if (look_opposite == 1) then
                     call ball_search_recursive(node%right, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 end if
             else
                 call ball_search_recursive(node%right, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
-                ! Check if we need to search the other subtree
-                if (abs(targett(axis+1) - node%point(axis+1)) <= radius) then
+                look_opposite = 0
+                if (abs(d1d) <= radius) look_opposite = 1
+#if periodic == 1
+                if (targett(axis+1) + radius >= L(axis+1) / 2. ) look_opposite = 1
+#endif
+                if (look_opposite == 1) then
                     call ball_search_recursive(node%left, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 end if
             end if
@@ -778,7 +789,16 @@ contains
         implicit none
         real, intent(in) :: p1(3), p2(3)
         real :: dist
-        dist = sqrt((p1(1) - p2(1))**2 + (p1(2) - p2(2))**2 + (p1(3) - p2(3))**2)
+        real :: dx, dy, dz
+        dx = p1(1) - p2(1)
+        dy = p1(2) - p2(2)
+        dz = p1(3) - p2(3)
+#if periodic == 1
+        dx = min(abs(dx), L(1) - abs(dx))
+        dy = min(abs(dy), L(2) - abs(dy))
+        dz = min(abs(dz), L(3) - abs(dz))
+#endif
+        dist = sqrt(dx**2 + dy**2 + dz**2)
     end function distance
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
