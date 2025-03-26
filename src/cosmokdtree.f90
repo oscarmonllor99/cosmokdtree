@@ -90,23 +90,39 @@ contains
         real, intent(in) :: x(:), y(:), z(:)
 #if periodic == 1
         real, intent(in) :: Lx, Ly, Lz
+        integer :: flag_stop
 #endif
         real, allocatable :: points(:, :)
         integer(kind=8), allocatable :: indices(:)
         integer(kind=8) :: n, i
         integer :: depth, max_depth, nproc, leafsize
         type(KDTreeNode), pointer :: tree
-        
-# if periodic == 1
-        ! Set the box size (global variable of the module)
-        L = [Lx, Ly, Lz]
-# endif
-        
+    
         ! Enable nested parallelism
         call omp_set_nested(.true.) 
     
         ! Number of points
         n = size(x, kind=8)
+
+# if periodic == 1
+        ! Set the box size (global variable of the module)
+        L = [Lx, Ly, Lz]
+
+        ! Check all points are within (-Lx/2, Lx/2)
+        flag_stop = 0
+        !$OMP PARALLEL SHARED(x,y,z,n,Lx,Ly,Lz), &
+        !$OMP PRIVATE(i)
+        !$OMP DO REDUCTION(+:flag_stop)
+        do i=1,n
+            if(x(i) .lt. -Lx/2 .or. x(i) .gt. Lx/2) flag_stop = 1
+            if(y(i) .lt. -Ly/2 .or. y(i) .gt. Ly/2) flag_stop = 1
+            if(z(i) .lt. -Lz/2 .or. z(i) .gt. Lz/2) flag_stop = 1
+        enddo
+        !$OMP ENDDO
+        !$OMP END PARALLEL
+
+        if (flag_stop .gt. 0) STOP 'Points outside (-L/2, L/2) range !!'
+# endif
 
         ! 3D points array
         allocate(points(n, 3))
@@ -330,13 +346,13 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     !k-nearest neighbor search
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    function knn_search(node, target, k) result(query)
+    function knn_search(node, targett, k) result(query)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         implicit none
         !in
         integer, intent(in) :: k ! Number of nearest neighbors to find
         type(KDTreeNode), pointer, intent(in) :: node
-        real, intent(in) :: target(3)
+        real, intent(in) :: targett(3)
         !local
         integer :: init_depth = 0
         !out
@@ -348,7 +364,7 @@ contains
         dist = HUGE(0.0)
         idx = -1
 
-        call knn_search_recursive(node, init_depth, target, dist, idx, k)
+        call knn_search_recursive(node, init_depth, targett, dist, idx, k)
 
         query%idx = idx
         query%dist = dist
@@ -359,19 +375,19 @@ contains
 
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    recursive subroutine knn_search_recursive(node, depth, target, dist, idx, k)
+    recursive subroutine knn_search_recursive(node, depth, targett, dist, idx, k)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         implicit none
         !in
         integer :: k ! Number of nearest neighbors to find
         type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
-        real, intent(in) :: target(3)                 ! Target point (3D)
+        real, intent(in) :: targett(3)                 ! Target point (3D)
         integer, intent(in) :: depth     
         !local
         real, intent(inout) :: dist(k)  
         integer(kind=8), intent(inout) :: idx(k) 
         integer :: i
-        real :: dist_current, dist_kth
+        real :: dist_current, dist_kth, d1d
         real :: epsilon = 1.e-6
         integer :: axis
         ! Temporary point for contiguous memory access
@@ -385,7 +401,7 @@ contains
             ! Check all points in the leaf
             do i = 1, size(node%leaf_indices)
                 temp_point = node%leaf_points(i, :)
-                dist_current = distance(temp_point, target)
+                dist_current = distance(temp_point, targett)
                 dist_kth = dist(k)
 
                 ! If the current point is closer than the k-th best, update the list
@@ -399,7 +415,7 @@ contains
         else
 
             ! Calculate distances
-            dist_current = distance(node%point, target)
+            dist_current = distance(node%point, targett)
             dist_kth = dist(k)
 
             ! Update best points and indices if the current node is closer than the k-th best
@@ -410,24 +426,35 @@ contains
             end if
 
             axis = node%axis
+            !1D distance from target to the splitting plane
+            d1d = targett(axis+1) - node%point(axis+1)
+
             ! Recursively search the subtree that contains the target
-            if (target(axis+1) < node%point(axis+1)) then
-                call knn_search_recursive(node%left, depth + 1, target, dist, idx, k)
+#if periodic == 0
+
+            if (d1d < 0) then
+                call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
                 dist_kth = dist(k)
                 !Check if we need to search the right subtree 
                 !(dist_kth is still bigger than the distance to the splitting plane)
-                if (abs(target(axis+1) - node%point(axis+1)) < dist_kth) then
-                    call knn_search_recursive(node%right, depth + 1, target, dist, idx, k)
+                if (abs(d1d) < dist_kth) then
+                    call knn_search_recursive(node%right, depth + 1, targett, dist, idx, k)
                 end if
             else
-                call knn_search_recursive(node%right, depth + 1, target, dist, idx, k)
+                call knn_search_recursive(node%right, depth + 1, targett, dist, idx, k)
                 dist_kth = dist(k)
                 !Check if we need to search the right subtree (dist_kth is still bigger than the distance to the splitting plane)
-                if (abs(target(axis+1) - node%point(axis+1)) < dist_kth) then
-                    call knn_search_recursive(node%left, depth + 1, target, dist, idx, k)
+                if (abs(d1d) < dist_kth) then
+                    call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
                 end if
             end if
-        end if
+
+#else
+
+
+#endif
+
+        end if !node%is_leaf
 
         contains
 
@@ -471,13 +498,13 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ! Search for points within a given radius
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    function ball_search(node, target, radius) result(query)
+    function ball_search(node, targett, radius) result(query)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     implicit none
     !in
     real :: radius ! Radius of the ball
     type(KDTreeNode), pointer, intent(in) :: node
-    real, intent(in) :: target(3)
+    real, intent(in) :: targett(3)
     !local
     integer :: init_depth = 0
     integer :: count_idx, count_dist, count ! Counters for the number of elements in idx and dist
@@ -496,7 +523,7 @@ contains
     count_dist = 0
     count_idx = 0
 
-    call ball_search_recursive(node, init_depth, target, dist, idx, radius, count_idx, count_dist)
+    call ball_search_recursive(node, init_depth, targett, dist, idx, radius, count_idx, count_dist)
 
     !Check
     if (count_idx .ne. count_dist) then
@@ -617,13 +644,13 @@ contains
 
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
-    recursive subroutine ball_search_recursive(node, depth, target, dist, idx, radius, count_idx, count_dist)
+    recursive subroutine ball_search_recursive(node, depth, targett, dist, idx, radius, count_idx, count_dist)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
         implicit none
         !in
         real :: radius ! Radius of the ball
         type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
-        real, intent(in) :: target(3)                 ! Target point (3D)
+        real, intent(in) :: targett(3)                 ! Target point (3D)
         integer, intent(in) :: depth     
         !out
         integer(kind=8), allocatable, intent(inout) :: idx(:)  ! Index of the points within the radius
@@ -647,7 +674,7 @@ contains
             ! Check all points in the leaf
             do i = 1, size(node%leaf_indices)
                 temp_point = node%leaf_points(i, :)
-                dist_current = distance(temp_point, target)
+                dist_current = distance(temp_point, targett)
                 ! if(count_dist.eq.0) write(*,*) radius, dist_current
                 if ( dist_current <= radius + epsilon ) then
                     ! Append the index to the list
@@ -659,7 +686,7 @@ contains
         else
 
             !Calculate this node distance
-            dist_current = distance(node%point, target)
+            dist_current = distance(node%point, targett)
             ! if(count_dist.eq.0) write(*,*) radius, dist_current
             if (dist_current <= radius + epsilon) then
                 call int_add_to_list(idx, node%index, count_idx)
@@ -669,17 +696,17 @@ contains
             axis = node%axis
 
             ! Recursively search
-            if (target(axis+1) < node%point(axis+1)) then
-                call ball_search_recursive(node%left, depth + 1, target, dist, idx, radius, count_idx, count_dist)
+            if (targett(axis+1) < node%point(axis+1)) then
+                call ball_search_recursive(node%left, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 ! Check if we need to search the other subtree
-                if (abs(target(axis+1) - node%point(axis+1)) <= radius) then
-                    call ball_search_recursive(node%right, depth + 1, target, dist, idx, radius, count_idx, count_dist)
+                if (abs(targett(axis+1) - node%point(axis+1)) <= radius) then
+                    call ball_search_recursive(node%right, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 end if
             else
-                call ball_search_recursive(node%right, depth + 1, target, dist, idx, radius, count_idx, count_dist)
+                call ball_search_recursive(node%right, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 ! Check if we need to search the other subtree
-                if (abs(target(axis+1) - node%point(axis+1)) <= radius) then
-                    call ball_search_recursive(node%left, depth + 1, target, dist, idx, radius, count_idx, count_dist)
+                if (abs(targett(axis+1) - node%point(axis+1)) <= radius) then
+                    call ball_search_recursive(node%left, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 end if
             end if
 
