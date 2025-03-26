@@ -4,7 +4,7 @@ NAME := cosmokdtree
 
 # Compiler and flags
 FC = gfortran
-FFLAGS = -O3 -g -J $(BINDIR)  # -J bin ensures .mod files are stored in bin/
+FFLAGS = -O3 -g -fopenmp -J $(BINDIR)  # -J bin ensures .mod files are stored in bin/
 
 # Module source file
 MOD_SRC = $(NAME).f90
