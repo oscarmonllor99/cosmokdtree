@@ -2,9 +2,14 @@
 BINDIR := bin
 NAME := cosmokdtree
 
+PERIODIC := $(if $(PERIODIC),$(PERIODIC),0)
+$(info PERIODIC = $(PERIODIC))
+
 # Compiler and flags
 FC = gfortran
-FFLAGS = -O3 -g -fopenmp -J $(BINDIR)  # -J bin ensures .mod files are stored in bin/
+FFLAGS = -cpp -O3 -g -fopenmp -mieee-fp -ftree-vectorize -march=native -mcmodel=medium -J $(BINDIR)  # -J bin ensures .mod files are stored in bin/
+
+FFLAGS += -Dperiodic=$(PERIODIC)
 
 # Module source file
 MOD_SRC = $(NAME).f90
@@ -27,3 +32,14 @@ all: $(MOD_OBJ)  # Ensures MOD_OBJ gets compiled
 # Clean
 clean:
 	rm -f $(MOD_OBJ) $(MOD_MOD)
+
+info:
+	@echo ""
+	@echo "***********************************************************"
+	@echo "***                    cosmo_kdtree                     ***"
+	@echo "***********************************************************"
+	@echo "* Óscar Monllor-Berbegal et al., Univ. de València, 2025  *"
+	@echo "***********************************************************"
+	@echo "*** FLAGS for compiling ***"
+	@echo "- PERIODIC (optional, default: 0): set to 1 if you want to "
+	@echo "                    use periodic boundary conditions"

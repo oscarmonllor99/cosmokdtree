@@ -69,21 +69,38 @@ module cosmokdtree
     end type KDTreeResult
     !+++++++++++++++++++++++++++++++
 
+#if periodic == 1
+    ! Box size (periodic boundary conditions), global variable
+    real :: L(3) ! Will be initialized in build_kdtree
+#endif
+
 contains
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ! Initialize kd-tree construction
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#if periodic == 1
+    function build_kdtree(x, y, z, Lx, Ly, Lz) result(tree)
+#else
     function build_kdtree(x, y, z) result(tree)
+#endif
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         use omp_lib
         implicit none
         real, intent(in) :: x(:), y(:), z(:)
+#if periodic == 1
+        real, intent(in) :: Lx, Ly, Lz
+#endif
         real, allocatable :: points(:, :)
         integer(kind=8), allocatable :: indices(:)
         integer(kind=8) :: n, i
         integer :: depth, max_depth, nproc, leafsize
         type(KDTreeNode), pointer :: tree
+        
+# if periodic == 1
+        ! Set the box size (global variable of the module)
+        L = [Lx, Ly, Lz]
+# endif
         
         ! Enable nested parallelism
         call omp_set_nested(.true.) 
