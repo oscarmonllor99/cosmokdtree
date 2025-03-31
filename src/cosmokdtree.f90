@@ -698,7 +698,7 @@ contains
             ! 1D distance from target to the splitting plane
             d1d = targett(axis+1) - node%point(axis+1)
             ! Recursively search the subtree that contains the target
-            if (targett(axis+1) < node%point(axis+1)) then
+            if (d1d < 0) then
                 call ball_search_recursive(node%left, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 ! Check if we need to search the other subtree
                 look_opposite = 0
