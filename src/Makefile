@@ -5,11 +5,17 @@ NAME := cosmokdtree
 PERIODIC := $(if $(PERIODIC),$(PERIODIC),0)
 $(info PERIODIC = $(PERIODIC))
 
+LONGINT := $(if $(LONGINT),$(LONGINT),0)
+$(info LONGINT = $(LONGINT))
+
+DOUBLEPRECISION := $(if $(DOUBLEPRECISION),$(DOUBLEPRECISION),0)
+$(info DOUBLEPRECISION = $(DOUBLEPRECISION))
+
 # Compiler and flags
 FC = gfortran
 FFLAGS = -cpp -O3 -g -fopenmp -mieee-fp -ftree-vectorize -march=native -mcmodel=medium -J $(BINDIR)  # -J bin ensures .mod files are stored in bin/
 
-FFLAGS += -Dperiodic=$(PERIODIC)
+FFLAGS += -Dperiodic=$(PERIODIC) -Dlongint=$(LONGINT) -Ddoubleprecision=$(DOUBLEPRECISION)
 
 # Module source file
 MOD_SRC = $(NAME).f90

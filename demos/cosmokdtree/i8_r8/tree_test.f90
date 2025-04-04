@@ -5,7 +5,7 @@ program main
 
     implicit none
 
-    integer, parameter :: prec = 4 
+    integer, parameter :: prec = 8 
     integer, parameter :: intkind = 8
 
     type(KDTreeNode), pointer :: root

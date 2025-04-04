@@ -6,7 +6,7 @@ program main
     implicit none
 
     integer, parameter :: prec = 4 
-    integer, parameter :: intkind = 8
+    integer, parameter :: intkind = 4
 
     type(KDTreeNode), pointer :: root
     type(KDTreeResult) :: query
