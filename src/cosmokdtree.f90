@@ -46,7 +46,8 @@ module cosmokdtree
 !#######################################################
     implicit none
     private  
-    public :: build_kdtree, KDTreeNode, KDTreeResult, knn_search, ball_search
+    public :: build_kdtree, KDTreeNode, KDTreeResult, knn_search, ball_search, &
+               box_search
 
     !+++++++++++++++++++++++++++++++
     !++++ Precision and integer kind
@@ -739,64 +740,198 @@ contains
 
         endif
 
-    contains
-
-        !subroutines to append an element to an array
-        subroutine int_add_to_list(indices, new_value, count)
-            implicit none
-            integer(kind=intkind), allocatable, intent(inout) :: indices(:)
-            integer(kind=intkind), intent(in) :: new_value
-            integer, intent(inout) :: count 
-            integer(kind=intkind), allocatable :: temp(:)
-            integer :: n
-
-            if (.not. allocated(indices)) then
-                ! Initial allocation with a reasonable size
-                allocate(indices(1000))
-                indices(1) = new_value
-                count = 1
-            else
-                if (count == size(indices)) then
-                    ! Resize the array
-                    n = size(indices)
-                    allocate(temp(10 * n))
-                    temp(1:n) = indices
-                    call move_alloc(temp, indices)
-                end if
-                count = count + 1
-                indices(count) = new_value
-            end if
-        end subroutine int_add_to_list
-
-        subroutine real_add_to_list(dist, new_value, count)
-            implicit none
-            real(kind=prec), allocatable, intent(inout) :: dist(:)
-            real(kind=prec), intent(in) :: new_value
-            integer, intent(inout) :: count
-            real(kind=prec), allocatable :: temp(:)
-            integer :: n
-
-            if (.not. allocated(dist)) then
-                ! Initial allocation with a reasonable size
-                allocate(dist(1000))
-                dist(1) = new_value
-                count = 1
-            else
-                if (count == size(dist)) then
-                    ! Resize the array by doubling its size
-                    n = size(dist)
-                    allocate(temp(10 * n))
-                    temp(1:n) = dist
-                    call move_alloc(temp, dist)
-                end if
-                count = count + 1
-                dist(count) = new_value
-            end if
-        end subroutine real_add_to_list
-
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     end subroutine ball_search_recursive
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ! Search for points within a given box (cuboid) aligned with cartesian axes
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    function box_search(node, box) result(query)
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        implicit none
+        !in
+        real(kind=prec) :: box(6) ! Box limits (xmin, xmax, ymin, ymax, zmin, zmax)
+        type(KDTreeNode), pointer, intent(in) :: node
+        !local
+        integer :: init_depth = 0
+        integer :: count_idx ! Counters for the number of elements in idx and dist
+        integer(kind=intkind), allocatable :: temp_idx(:)
+        !out
+        integer(kind=intkind), allocatable :: idx(:) !index of the points within the radius
+        type(KDTreeResult) :: query
+    
+        !Preallocate idx with a reasonable size
+        !If the size is not enough, it will be resized with 10x the current size
+        allocate(idx(1000))
+        idx = -1
+        count_idx = 0
+    
+        call box_search_recursive(node, init_depth, idx, box, count_idx)
+    
+        if (.not. allocated(idx)) STOP 'idx array is not allocated!'
+            
+        if (count_idx == 0) then
+            ! No points found
+            temp_idx = idx(1:0)
+            call move_alloc(temp_idx, idx)
+        else
+            ! Reallocation to the correct size
+            temp_idx = idx(1:count_idx)
+            call move_alloc(temp_idx, idx)
+            
+            !For the moment, we do not sort the points by distance to the target
+
+        end if
+    
+        query%idx = idx
+
+        ! Distances are not calculated in this function, hence dist is not allocated
+        ! query%dist => null()
+    
+        deallocate(idx)
+
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    end function box_search
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+
+
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
+    recursive subroutine box_search_recursive(node, depth, idx, box, count_idx)
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
+        implicit none
+        !in
+        real(kind=prec) :: box(6) ! Box limits (xmin, xmax, ymin, ymax, zmin, zmax)
+        type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
+        integer, intent(in) :: depth     
+        !out
+        integer(kind=intkind), allocatable, intent(inout) :: idx(:)  ! Index of the points within the box
+        integer, intent(inout) :: count_idx ! Counters for the number of elements in idx 
+        !local
+        integer :: i
+        logical :: in_box ! tells if a point is inside the query box
+        integer :: axis
+        ! Temporary point for contiguous memory access
+        real(kind=prec):: temp_point(3)
+
+        if (.not. associated(node)) then
+            return
+        end if
+
+        ! First, check if it is a leaf node
+        if (node%is_leaf == 1) then
+            
+            ! Check all points in the leaf with brute force
+            do i = 1, size(node%leaf_indices)
+                temp_point = node%leaf_points(i, :)
+                call is_in_box(temp_point, box, in_box)
+                if ( in_box .eqv. .true. ) then
+                    ! Append the index to the list
+                    call int_add_to_list(idx, node%leaf_indices(i), count_idx)
+                end if
+            end do
+
+        else
+
+            !See if this node is inside the box
+            call is_in_box(node%point, box, in_box)
+            if ( in_box .eqv. .true. ) then
+                call int_add_to_list(idx, node%index, count_idx)
+            end if
+
+            axis = node%axis
+
+            ! Recursively search the subtrees intersecting the box
+            ! Periodicity does not makes sense as the query box is assumed to be contained
+            ! inside the (periodic) bounding box of all points
+            if (box(2*axis+1) < node%point(axis+1)) then
+                call box_search_recursive(node%left, depth + 1, idx, box, count_idx)
+            endif
+
+            if (box(2*axis+2) > node%point(axis+1)) then
+                call box_search_recursive(node%right, depth + 1, idx, box, count_idx)
+            endif
+
+        endif !node%is_leaf
+
+    contains
+
+        !subroutine to check if a point is inside the query box
+        subroutine is_in_box(point, box, in_box)
+            implicit none
+            real(kind=prec), intent(in) :: point(3) ! Point to check
+            real(kind=prec), intent(in) :: box(6)   ! Box limits (xmin, xmax, ymin, ymax, zmin, zmax)
+            logical, intent(out) :: in_box          ! Result: true if the point is inside the box
+
+            in_box = .true.
+            if (point(1) < box(1) .or. point(1) > box(2)) in_box = .false.
+            if (point(2) < box(3) .or. point(2) > box(4)) in_box = .false.
+            if (point(3) < box(5) .or. point(3) > box(6)) in_box = .false.
+        end subroutine is_in_box
+
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    end subroutine box_search_recursive
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    !subroutines to append an element to an array, called by BALL_SEARCH and BOX_SEARCH
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    subroutine int_add_to_list(indices, new_value, count)
+        implicit none
+        integer(kind=intkind), allocatable, intent(inout) :: indices(:)
+        integer(kind=intkind), intent(in) :: new_value
+        integer, intent(inout) :: count 
+        integer(kind=intkind), allocatable :: temp(:)
+        integer :: n
+
+        if (.not. allocated(indices)) then
+            ! Initial allocation with a reasonable size
+            allocate(indices(1000))
+            indices(1) = new_value
+            count = 1
+        else
+            if (count == size(indices)) then
+                ! Resize the array
+                n = size(indices)
+                allocate(temp(10 * n))
+                temp(1:n) = indices
+                call move_alloc(temp, indices)
+            end if
+            count = count + 1
+            indices(count) = new_value
+        end if
+    end subroutine int_add_to_list
+
+
+    subroutine real_add_to_list(dist, new_value, count)
+        implicit none
+        real(kind=prec), allocatable, intent(inout) :: dist(:)
+        real(kind=prec), intent(in) :: new_value
+        integer, intent(inout) :: count
+        real(kind=prec), allocatable :: temp(:)
+        integer :: n
+
+        if (.not. allocated(dist)) then
+            ! Initial allocation with a reasonable size
+            allocate(dist(1000))
+            dist(1) = new_value
+            count = 1
+        else
+            if (count == size(dist)) then
+                ! Resize the array by doubling its size
+                n = size(dist)
+                allocate(temp(10 * n))
+                temp(1:n) = dist
+                call move_alloc(temp, dist)
+            end if
+            count = count + 1
+            dist(count) = new_value
+        end if
+    end subroutine real_add_to_list
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ! Euclidean distance between two 3D points
