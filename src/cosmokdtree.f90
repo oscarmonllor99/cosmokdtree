@@ -47,31 +47,47 @@ module cosmokdtree
     implicit none
     private  
     public :: build_kdtree, KDTreeNode, KDTreeResult, knn_search, ball_search
+
+    !+++++++++++++++++++++++++++++++
+    !++++ Precision and integer kind
+    !+++++++++++++++++++++++++++++++
+#if doubleprecision == 1 
+    integer, parameter :: prec = 8 
+#else
+    integer, parameter :: prec = 4
+#endif
+
+#if longint == 1
+    integer, parameter :: intkind = 8
+#else
+    integer, parameter :: intkind = 4
+#endif
+
     !+++++++++++++++++++++++++++++++
     !++++ Type definitions
     !+++++++++++++++++++++++++++++++
     type :: KDTreeNode
         !basic ---------------------
-        real :: point(3)       ! 3D point (x, y, z)
-        integer(kind=8) :: index       ! Index of the point within the original array
+        real(kind=prec):: point(3)       ! 3D point (x, y, z)
+        integer(kind=intkind) :: index       ! Index of the point within the original array
         integer :: axis        ! Splitting axis (0 for x, 1 for y, 2 for z)
         type(KDTreeNode), pointer :: left => null()  ! Left child
         type(KDTreeNode), pointer :: right => null() ! Right child
         !leaf, for faster search and building
         integer :: is_leaf     ! Flag to indicate if the node is a leaf
-        real, pointer :: leaf_points(:, :) => null()  ! Points in the leaf (for leaf nodes)
-        integer(kind=8), pointer :: leaf_indices(:) => null()  ! Indices of points in the leaf
+        real(kind=prec), pointer :: leaf_points(:, :) => null()  ! Points in the leaf (for leaf nodes)
+        integer(kind=intkind), pointer :: leaf_indices(:) => null()  ! Indices of points in the leaf
     end type KDTreeNode
 
     type :: KDTreeResult
-        integer(kind=8), allocatable :: idx(:)
-        real, allocatable :: dist(:)
+        integer(kind=intkind), allocatable :: idx(:)
+        real(kind=prec), allocatable :: dist(:)
     end type KDTreeResult
     !+++++++++++++++++++++++++++++++
 
 #if periodic == 1
     ! Box size (periodic boundary conditions), global variable
-    real :: L(3) ! Will be initialized in build_kdtree
+    real(kind=prec):: L(3) ! Will be initialized in build_kdtree
 #endif
 
 contains
@@ -87,14 +103,14 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         use omp_lib
         implicit none
-        real, intent(in) :: x(:), y(:), z(:)
+        real(kind=prec), intent(in) :: x(:), y(:), z(:)
 #if periodic == 1
-        real, intent(in) :: Lx, Ly, Lz
+        real(kind=prec), intent(in) :: Lx, Ly, Lz
         integer :: flag_stop
 #endif
-        real, allocatable :: points(:, :)
-        integer(kind=8), allocatable :: indices(:)
-        integer(kind=8) :: n, i
+        real(kind=prec), allocatable :: points(:, :)
+        integer(kind=intkind), allocatable :: indices(:)
+        integer(kind=intkind) :: n, i
         integer :: depth, max_depth, nproc, leafsize
         type(KDTreeNode), pointer :: tree
     
@@ -102,7 +118,7 @@ contains
         call omp_set_nested(.true.) 
     
         ! Number of points
-        n = size(x, kind=8)
+        n = size(x, kind=intkind)
 
 # if periodic == 1
         ! Set the box size (global variable of the module)
@@ -176,16 +192,16 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     use omp_lib
     implicit none
-    real, intent(inout) :: points(:, :)      ! 2D array of points
-    integer(kind=8), intent(inout) :: indices(:) ! 1D array of indices
+    real(kind=prec), intent(inout) :: points(:, :)      ! 2D array of points
+    integer(kind=intkind), intent(inout) :: indices(:) ! 1D array of indices
     integer, intent(in) :: depth         ! Current depth in the tree
     integer, intent(in) :: max_depth
     integer, intent(in) :: leafsize
     integer :: axis
     type(KDTreeNode), pointer :: node   ! New node to be created
-    real :: kth_point(size(points, 2))
-    integer(kind=8) :: median
-    integer(kind=8) :: kth_index
+    real(kind=prec):: kth_point(size(points, 2))
+    integer(kind=intkind) :: median
+    integer(kind=intkind) :: kth_index
 
     if (size(points, 1) == 0) then
         node => null()
@@ -196,7 +212,7 @@ contains
     axis = mod(depth, 3)
 
     ! Find median and partition points
-    median = size(points, 1, kind=8) / 2 + 1
+    median = size(points, 1, kind=intkind) / 2 + 1
     call quickselect(points, indices, median, axis, kth_point, kth_index)
 
     ! Allocate node
@@ -206,11 +222,11 @@ contains
     node%axis = axis
 
     ! Check if this is a leaf node
-    if (size(points, 1, kind=8) <= leafsize) then
+    if (size(points, 1, kind=intkind) <= leafsize) then
         node%is_leaf = 1
         ! Store all points and indices in the leaf node
-        allocate(node%leaf_points(size(points, 1, kind=8), size(points, 2)))
-        allocate(node%leaf_indices(size(points, 1, kind=8)))
+        allocate(node%leaf_points(size(points, 1, kind=intkind), size(points, 2)))
+        allocate(node%leaf_indices(size(points, 1, kind=intkind)))
         node%leaf_points = points
         node%leaf_indices = indices
         node%left => null()
@@ -253,16 +269,16 @@ contains
     ! specified axis.
     subroutine quickselect(points, indices, k, axis, kth_point, kth_index)
         implicit none
-        real, intent(inout) :: points(:, :)      ! 2D array of points
-        integer(kind=8), intent(inout) :: indices(:) ! 1D array of indices
-        integer(kind=8), intent(in) :: k         ! k-th smallest element to find
+        real(kind=prec), intent(inout) :: points(:, :)      ! 2D array of points
+        integer(kind=intkind), intent(inout) :: indices(:) ! 1D array of indices
+        integer(kind=intkind), intent(in) :: k         ! k-th smallest element to find
         integer, intent(in) :: axis             ! Axis to sort along (0 for x, 1 for y, 2 for z)
-        real, intent(out) :: kth_point(size(points, 2))  ! The k-th smallest point
-        integer(kind=8), intent(out) :: kth_index        ! Index of the k-th smallest point
-        integer(kind=8) :: left, right, pivot_index
+        real(kind=prec), intent(out) :: kth_point(size(points, 2))  ! The k-th smallest point
+        integer(kind=intkind), intent(out) :: kth_index        ! Index of the k-th smallest point
+        integer(kind=intkind) :: left, right, pivot_index
     
         left = 1
-        right = size(points, 1, kind=8)
+        right = size(points, 1, intkind)
     
         do while (left <= right)
             ! Partition the array and get the pivot index
@@ -290,13 +306,13 @@ contains
     ! Partition function for Quickselect
     function partition(points, indices, left, right, axis) result(pivot_index)
         implicit none
-        real, intent(inout) :: points(:, :)      ! 2D array of points
-        integer(kind=8), intent(inout) :: indices(:) ! 1D array of indices
-        integer(kind=8), intent(in) :: left, right  ! Left and right bounds of the partition
+        real(kind=prec), intent(inout) :: points(:, :)      ! 2D array of points
+        integer(kind=intkind), intent(inout) :: indices(:) ! 1D array of indices
+        integer(kind=intkind), intent(in) :: left, right  ! Left and right bounds of the partition
         integer, intent(in) :: axis             ! Axis to sort along (0 for x, 1 for y, 2 for z)
-        integer(kind=8) :: pivot_index, i, j
-        real :: pivot_value, temp_point(size(points, 2))
-        integer(kind=8) :: temp_index
+        integer(kind=intkind) :: pivot_index, i, j
+        real(kind=prec):: pivot_value, temp_point(size(points, 2))
+        integer(kind=intkind) :: temp_index
     
         ! Choose pivot as the middle element
         pivot_index = (left + right) / 2
@@ -324,11 +340,11 @@ contains
 
     subroutine swap(points, indices, i, j)
         implicit none
-        real, intent(inout) :: points(:, :)
-        integer(kind=8), intent(inout) :: indices(:)
-        integer(kind=8), intent(in) :: i, j
-        real :: temp_point(size(points, 2))
-        integer(kind=8) :: temp_index
+        real(kind=prec), intent(inout) :: points(:, :)
+        integer(kind=intkind), intent(inout) :: indices(:)
+        integer(kind=intkind), intent(in) :: i, j
+        real(kind=prec):: temp_point(size(points, 2))
+        integer(kind=intkind) :: temp_index
     
         ! Swap points
         temp_point = points(i, :)
@@ -352,12 +368,12 @@ contains
         !in
         integer, intent(in) :: k ! Number of nearest neighbors to find
         type(KDTreeNode), pointer, intent(in) :: node
-        real, intent(in) :: targett(3)
+        real(kind=prec), intent(in) :: targett(3)
         !local
         integer :: init_depth = 0
         !out
-        real :: dist(k)
-        integer(kind=8) :: idx(k)
+        real(kind=prec):: dist(k)
+        integer(kind=intkind) :: idx(k)
         type(KDTreeResult) :: query
 
         !Initialize 
@@ -381,18 +397,18 @@ contains
         !in
         integer :: k ! Number of nearest neighbors to find
         type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
-        real, intent(in) :: targett(3)                 ! Target point (3D)
+        real(kind=prec), intent(in) :: targett(3)                 ! Target point (3D)
         integer, intent(in) :: depth     
         !local
-        real, intent(inout) :: dist(k)  
-        integer(kind=8), intent(inout) :: idx(k) 
+        real(kind=prec), intent(inout) :: dist(k)  
+        integer(kind=intkind), intent(inout) :: idx(k) 
         integer :: i
-        real :: dist_current, dist_kth, d1d
-        real :: epsilon = 1.e-6
+        real(kind=prec):: dist_current, dist_kth, d1d
+        real(kind=prec):: epsilon = 1.e-6
         integer :: axis
         integer :: look_opposite
         ! Temporary point for contiguous memory access
-        real :: temp_point(3)
+        real(kind=prec):: temp_point(3)
 
         if (.not. associated(node)) return
 
@@ -465,12 +481,12 @@ contains
             subroutine shift_knn(dist, idx, k)
                 implicit none
                 !inout
-                real, intent(inout) :: dist(k)
-                integer(kind=8), intent(inout) :: idx(k)
+                real(kind=prec), intent(inout) :: dist(k)
+                integer(kind=intkind), intent(inout) :: idx(k)
                 integer, intent(in) :: k
                 !local
-                real :: temp_dist
-                integer(kind=8) :: temp_idx
+                real(kind=prec):: temp_dist
+                integer(kind=intkind) :: temp_idx
                 integer :: i
             
                 ! Store the new element to be inserted
@@ -504,17 +520,17 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     implicit none
     !in
-    real :: radius ! Radius of the ball
+    real(kind=prec):: radius ! Radius of the ball
     type(KDTreeNode), pointer, intent(in) :: node
-    real, intent(in) :: targett(3)
+    real(kind=prec), intent(in) :: targett(3)
     !local
     integer :: init_depth = 0
     integer :: count_idx, count_dist, count ! Counters for the number of elements in idx and dist
-    integer(kind=8), allocatable :: temp_idx(:)
-    real, allocatable :: temp_dist(:)
+    integer(kind=intkind), allocatable :: temp_idx(:)
+    real(kind=prec), allocatable :: temp_dist(:)
     !out
-    real, allocatable :: dist(:) ! Distance of the points within the radius
-    integer(kind=8), allocatable :: idx(:) !index of the points within the radius
+    real(kind=prec), allocatable :: dist(:) ! Distance of the points within the radius
+    integer(kind=intkind), allocatable :: idx(:) !index of the points within the radius
     type(KDTreeResult) :: query
 
     !Preallocate dist and idx
@@ -562,8 +578,8 @@ contains
         subroutine quicksort(dist, idx, n)
             implicit none
             !in/out
-            real, intent(inout) :: dist(n)    ! Distance array to be sorted
-            integer(kind=8), intent(inout) :: idx(n) ! Corresponding indices
+            real(kind=prec), intent(inout) :: dist(n)    ! Distance array to be sorted
+            integer(kind=intkind), intent(inout) :: idx(n) ! Corresponding indices
             integer, intent(in) :: n          ! Number of elements to sort
             !local
             integer :: low, high
@@ -577,8 +593,8 @@ contains
             implicit none
             !in/out
             integer, intent(in) :: n
-            real, intent(inout) :: dist(n)
-            integer(kind=8), intent(inout) :: idx(n)
+            real(kind=prec), intent(inout) :: dist(n)
+            integer(kind=intkind), intent(inout) :: idx(n)
             integer, intent(in) :: low, high
             !local
             integer :: pivot_index
@@ -598,15 +614,15 @@ contains
             implicit none
             !in/out
             integer, intent(in) :: n
-            real, intent(inout) :: dist(n)
-            integer(kind=8), intent(inout) :: idx(n)
+            real(kind=prec), intent(inout) :: dist(n)
+            integer(kind=intkind), intent(inout) :: idx(n)
             integer, intent(in) :: low, high
             integer, intent(out) :: pivot_index
             !local
-            real :: pivot_value
+            real(kind=prec):: pivot_value
             integer :: i, j
-            real :: temp_dist
-            integer(kind=8) :: temp_idx
+            real(kind=prec):: temp_dist
+            integer(kind=intkind) :: temp_idx
 
             ! Choose the pivot (here, we use the last element)
             pivot_value = dist(high)
@@ -650,22 +666,22 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
         implicit none
         !in
-        real :: radius ! Radius of the ball
+        real(kind=prec):: radius ! Radius of the ball
         type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
-        real, intent(in) :: targett(3)                 ! Target point (3D)
+        real(kind=prec), intent(in) :: targett(3)                 ! Target point (3D)
         integer, intent(in) :: depth     
         !out
-        integer(kind=8), allocatable, intent(inout) :: idx(:)  ! Index of the points within the radius
-        real, allocatable, intent(inout) :: dist(:)
+        integer(kind=intkind), allocatable, intent(inout) :: idx(:)  ! Index of the points within the radius
+        real(kind=prec), allocatable, intent(inout) :: dist(:)
         integer, intent(inout) :: count_idx, count_dist ! Counters for the number of elements in idx and dist
         !local
         integer :: i
-        real :: dist_current, d1d
+        real(kind=prec):: dist_current, d1d
         integer :: axis
-        real :: epsilon = 1.e-6
+        real(kind=prec):: epsilon = 1.e-6
         integer :: look_opposite
         ! Temporary point for contiguous memory access
-        real :: temp_point(3)
+        real(kind=prec):: temp_point(3)
 
         if (.not. associated(node)) then
             return
@@ -728,10 +744,10 @@ contains
         !subroutines to append an element to an array
         subroutine int_add_to_list(indices, new_value, count)
             implicit none
-            integer(kind=8), allocatable, intent(inout) :: indices(:)
-            integer(kind=8), intent(in) :: new_value
+            integer(kind=intkind), allocatable, intent(inout) :: indices(:)
+            integer(kind=intkind), intent(in) :: new_value
             integer, intent(inout) :: count
-            integer(kind=8), allocatable :: temp(:)
+            integer(kind=intkind), allocatable :: temp(:)
             integer :: n
 
             if (.not. allocated(indices)) then
@@ -754,10 +770,10 @@ contains
 
         subroutine real_add_to_list(dist, new_value, count)
             implicit none
-            real, allocatable, intent(inout) :: dist(:)
-            real, intent(in) :: new_value
+            real(kind=prec), allocatable, intent(inout) :: dist(:)
+            real(kind=prec), intent(in) :: new_value
             integer, intent(inout) :: count
-            real, allocatable :: temp(:)
+            real(kind=prec), allocatable :: temp(:)
             integer :: n
 
             if (.not. allocated(dist)) then
@@ -787,9 +803,9 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     function distance(p1, p2) result(dist)
         implicit none
-        real, intent(in) :: p1(3), p2(3)
-        real :: dist
-        real :: dx, dy, dz
+        real(kind=prec), intent(in) :: p1(3), p2(3)
+        real(kind=prec):: dist
+        real(kind=prec):: dx, dy, dz
         dx = p1(1) - p2(1)
         dy = p1(2) - p2(2)
         dz = p1(3) - p2(3)
