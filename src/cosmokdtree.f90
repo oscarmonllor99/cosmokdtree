@@ -2,13 +2,13 @@
 ! kd-tree module
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! GRUP DE COSMOLOGIA COMPUTACIONAL (GCC) UNIVERSITAT DE VALÈNCIA
-! Author: Óscar Monllor Berbegal
+! Authors: Óscar Monllor Berbegal and David Vallés Pérez
 ! Date: 30/01/2025
-! Last update: 13/02/2025
+! Last update: 04/05/2025
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! Brief description:
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-! - This module implements an optimized parallel kd-tree construction and 
+! - This module implements an optimized parallel k-d tree construction and 
 !   search for k-nearest neighbors and points within a given radius.
 !
 ! - Quickselect is used to find the point that splits the space
@@ -195,13 +195,13 @@ contains
     real(kind=prec), intent(inout) :: points(:, :)      ! 2D array of points
     integer(kind=intkind), intent(inout) :: indices(:) ! 1D array of indices
     integer, intent(in) :: depth         ! Current depth in the tree
-    integer, intent(in) :: max_depth
-    integer, intent(in) :: leafsize
-    integer :: axis
+    integer, intent(in) :: max_depth ! max_depth to allow parallelism
+    integer, intent(in) :: leafsize ! size of leaf nodes
+    integer :: axis !axis to split points
     type(KDTreeNode), pointer :: node   ! New node to be created
-    real(kind=prec):: kth_point(size(points, 2))
-    integer(kind=intkind) :: median
-    integer(kind=intkind) :: kth_index
+    real(kind=prec):: kth_point(size(points, 2)) ! median point
+    integer(kind=intkind) :: median ! half size of data
+    integer(kind=intkind) :: kth_index ! index of the median point
 
     if (size(points, 1) == 0) then
         node => null()
@@ -311,8 +311,7 @@ contains
         integer(kind=intkind), intent(in) :: left, right  ! Left and right bounds of the partition
         integer, intent(in) :: axis             ! Axis to sort along (0 for x, 1 for y, 2 for z)
         integer(kind=intkind) :: pivot_index, i, j
-        real(kind=prec):: pivot_value, temp_point(size(points, 2))
-        integer(kind=intkind) :: temp_index
+        real(kind=prec):: pivot_value
     
         ! Choose pivot as the middle element
         pivot_index = (left + right) / 2
@@ -323,7 +322,7 @@ contains
     
         i = left - 1
     
-        ! Partition the array
+        ! Move all elements smaller than or equal to pivot to the left
         do j = left, right - 1
             if (points(j, axis + 1) <= pivot_value) then
                 i = i + 1
@@ -402,9 +401,9 @@ contains
         !local
         real(kind=prec), intent(inout) :: dist(k)  
         integer(kind=intkind), intent(inout) :: idx(k) 
-        integer :: i
+        integer :: i ! Index running over leaf points
         real(kind=prec):: dist_current, dist_kth, d1d
-        real(kind=prec):: epsilon = 1.e-6
+        real(kind=prec):: epsilon = 1.e-6 
         integer :: axis
         integer :: look_opposite
         ! Temporary point for contiguous memory access
@@ -415,7 +414,7 @@ contains
         ! First, check if it is a leaf node
         if (node%is_leaf == 1) then
             
-            ! Check all points in the leaf
+            ! Check all points in the leaf with brute force
             do i = 1, size(node%leaf_indices)
                 temp_point = node%leaf_points(i, :)
                 dist_current = distance(temp_point, targett)
@@ -525,7 +524,7 @@ contains
     real(kind=prec), intent(in) :: targett(3)
     !local
     integer :: init_depth = 0
-    integer :: count_idx, count_dist, count ! Counters for the number of elements in idx and dist
+    integer :: count_idx, count_dist ! Counters for the number of elements in idx and dist
     integer(kind=intkind), allocatable :: temp_idx(:)
     real(kind=prec), allocatable :: temp_dist(:)
     !out
@@ -533,8 +532,9 @@ contains
     integer(kind=intkind), allocatable :: idx(:) !index of the points within the radius
     type(KDTreeResult) :: query
 
-    !Preallocate dist and idx
-    allocate(dist(1000))
+    !Preallocate dist and idx with a reasonable size
+    !If the size is not enough, it will be resized with 10x the current size
+    allocate(dist(1000)) 
     allocate(idx(1000))
     dist = HUGE(0.0)
     idx = -1
@@ -690,7 +690,7 @@ contains
         ! First, check if it is a leaf node
         if (node%is_leaf == 1) then
             
-            ! Check all points in the leaf
+            ! Check all points in the leaf with brute force
             do i = 1, size(node%leaf_indices)
                 temp_point = node%leaf_points(i, :)
                 dist_current = distance(temp_point, targett)
@@ -746,7 +746,7 @@ contains
             implicit none
             integer(kind=intkind), allocatable, intent(inout) :: indices(:)
             integer(kind=intkind), intent(in) :: new_value
-            integer, intent(inout) :: count
+            integer, intent(inout) :: count 
             integer(kind=intkind), allocatable :: temp(:)
             integer :: n
 
