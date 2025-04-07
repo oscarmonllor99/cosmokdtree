@@ -406,7 +406,7 @@ contains
         real(kind=prec):: dist_current, dist_kth, d1d
         real(kind=prec):: epsilon = 1.e-6 
         integer :: axis
-        integer :: look_opposite
+        logical :: look_opposite
         ! Temporary point for contiguous memory access
         real(kind=prec):: temp_point(3)
 
@@ -450,23 +450,24 @@ contains
                 call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
                 dist_kth = dist(k)
                 !Check if we need to search the right subtree 
-                look_opposite = 0
-                if (abs(d1d) < dist_kth) look_opposite = 1
+                look_opposite = .false.
+                if (abs(d1d) < dist_kth) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) - dist_kth <= -L(axis+1) / 2. ) look_opposite = 1
+                if (targett(axis+1) - dist_kth <= -L(axis+1) / 2. ) look_opposite = .true.
 #endif
-                if (look_opposite == 1) then
+                if (look_opposite .eqv. .true.) then
                     call knn_search_recursive(node%right, depth + 1, targett, dist, idx, k)
                 end if
             else
                 call knn_search_recursive(node%right, depth + 1, targett, dist, idx, k)
                 dist_kth = dist(k)
                 !Check if we need to search the left subtree
-                if (abs(d1d) < dist_kth) look_opposite = 1
+                look_opposite = .false.
+                if (abs(d1d) < dist_kth) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) + dist_kth >= L(axis+1) / 2. ) look_opposite = 1
+                if (targett(axis+1) + dist_kth >= L(axis+1) / 2. ) look_opposite = .true.
 #endif
-                if (look_opposite == 1) then
+                if (look_opposite .eqv. .true.) then
                     call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
                 end if
             end if
@@ -476,8 +477,9 @@ contains
 
         contains
 
+            !(DEPRECATED in favor of binary_search_insert)
             !this is only a shiftdown of the k-th element
-            !not a full sort
+            !not a full sort. Complexity is O(k)
             subroutine shift_knn(dist, idx, k)
                 implicit none
                 !inout
@@ -680,7 +682,7 @@ contains
         real(kind=prec):: dist_current, d1d
         integer :: axis
         real(kind=prec):: epsilon = 1.e-6
-        integer :: look_opposite
+        logical :: look_opposite
         ! Temporary point for contiguous memory access
         real(kind=prec):: temp_point(3)
 
@@ -718,22 +720,22 @@ contains
             if (d1d < 0) then
                 call ball_search_recursive(node%left, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 ! Check if we need to search the other subtree
-                look_opposite = 0
-                if (abs(d1d) <= radius) look_opposite = 1
+                look_opposite = .false.
+                if (abs(d1d) <= radius) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) - radius <= -L(axis+1) / 2. ) look_opposite = 1
+                if (targett(axis+1) - radius <= -L(axis+1) / 2. ) look_opposite = .true.
 #endif
-                if (look_opposite == 1) then
+                if (look_opposite .eqv. .true.) then
                     call ball_search_recursive(node%right, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 end if
             else
                 call ball_search_recursive(node%right, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
-                look_opposite = 0
-                if (abs(d1d) <= radius) look_opposite = 1
+                look_opposite = .false.
+                if (abs(d1d) <= radius) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) + radius >= L(axis+1) / 2. ) look_opposite = 1
+                if (targett(axis+1) + radius >= L(axis+1) / 2. ) look_opposite = .true.
 #endif
-                if (look_opposite == 1) then
+                if (look_opposite .eqv. .true.) then
                     call ball_search_recursive(node%left, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
                 end if
             end if
