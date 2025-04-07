@@ -382,6 +382,9 @@ contains
 
         call knn_search_recursive(node, init_depth, targett, dist, idx, k)
 
+        !Perform full sort with quicksort
+        call quicksort(dist, idx, k)
+
         query%idx = idx
         query%dist = dist
 
@@ -403,7 +406,7 @@ contains
         real(kind=prec), intent(inout) :: dist(k)  
         integer(kind=intkind), intent(inout) :: idx(k) 
         integer :: i ! Index running over leaf points
-        real(kind=prec):: dist_current, dist_kth, d1d
+        real(kind=prec):: dist_current, dist_furthest, d1d
         real(kind=prec):: epsilon = 1.e-6 
         integer :: axis
         logical :: look_opposite
@@ -419,13 +422,13 @@ contains
             do i = 1, size(node%leaf_indices)
                 temp_point = node%leaf_points(i, :)
                 dist_current = distance(temp_point, targett)
-                dist_kth = dist(k)
+                dist_furthest = dist(1)
 
-                ! If the current point is closer than the k-th best, update the list
-                if (dist_current < dist_kth + epsilon) then
-                    dist(k) = dist_current
-                    idx(k) = node%leaf_indices(i)
-                    call binary_search_insert(dist, idx, k)
+                ! If the current point is closer than the furthest, replace it
+                if (dist_current < dist_furthest + epsilon) then
+                    dist(1) = dist_current
+                    idx(1) = node%leaf_indices(i)
+                    call max_heap_insert(dist, idx, k)
                 end if
             end do
 
@@ -433,13 +436,13 @@ contains
 
             ! Calculate distances
             dist_current = distance(node%point, targett)
-            dist_kth = dist(k)
+            dist_furthest = dist(1)
 
-            ! Update best points and indices if the current node is closer than the k-th best
-            if (dist_current < dist_kth + epsilon) then
-                dist(k) = dist_current
-                idx(k) = node%index
-                call binary_search_insert(dist, idx, k)
+            ! Update best points and indices if the current node is closer than the furthest
+            if (dist_current < dist_furthest + epsilon) then
+                dist(1) = dist_current
+                idx(1) = node%index
+                call max_heap_insert(dist, idx, k)
             end if
 
             axis = node%axis
@@ -448,24 +451,24 @@ contains
             ! Recursively search the subtree that contains the target
             if (d1d < 0) then
                 call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
-                dist_kth = dist(k)
+                dist_furthest = dist(1)
                 !Check if we need to search the right subtree 
                 look_opposite = .false.
-                if (abs(d1d) < dist_kth) look_opposite = .true.
+                if (abs(d1d) < dist_furthest) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) - dist_kth <= -L(axis+1) / 2. ) look_opposite = .true.
+                if (targett(axis+1) - dist_furthest <= -L(axis+1) / 2. ) look_opposite = .true.
 #endif
                 if (look_opposite .eqv. .true.) then
                     call knn_search_recursive(node%right, depth + 1, targett, dist, idx, k)
                 end if
             else
                 call knn_search_recursive(node%right, depth + 1, targett, dist, idx, k)
-                dist_kth = dist(k)
+                dist_furthest = dist(1)
                 !Check if we need to search the left subtree
                 look_opposite = .false.
-                if (abs(d1d) < dist_kth) look_opposite = .true.
+                if (abs(d1d) < dist_furthest) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) + dist_kth >= L(axis+1) / 2. ) look_opposite = .true.
+                if (targett(axis+1) + dist_furthest >= L(axis+1) / 2. ) look_opposite = .true.
 #endif
                 if (look_opposite .eqv. .true.) then
                     call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
@@ -477,91 +480,50 @@ contains
 
         contains
 
-            !(DEPRECATED in favor of binary_search_insert)
-            !this is only a shiftdown of the k-th element
-            !not a full sort. Complexity is O(k)
-            subroutine shift_knn(dist, idx, k)
+            !Instead of keeping a sorted list of distances and indices, we use a max-heap
+            !to keep track of the furthest point in the list of k nearest neighbors
+            subroutine max_heap_insert(dist, idx, k)
                 implicit none
-                !inout
+                ! Inputs
+                integer, intent(in) :: k
                 real(kind=prec), intent(inout) :: dist(k)
                 integer(kind=intkind), intent(inout) :: idx(k)
-                integer, intent(in) :: k
-                !local
-                real(kind=prec):: temp_dist
-                integer(kind=intkind) :: temp_idx
-                integer :: i
+                ! Local
+                integer :: i, largest, left, right
+                real(kind=prec) :: tmp_dist
+                integer(kind=intkind) :: tmp_idx
             
-                ! Store the new element to be inserted
-                temp_dist = dist(k)
-                temp_idx = idx(k)
-            
-                ! Start from the end of the array and move the new element to its correct position
-                i = k - 1
-            
-                ! Shift elements greater than temp_dist to the right
-                do while (i >= 1)
-                    if (dist(i) <= temp_dist) exit  ! Exit the loop if the correct position is found
-                    dist(i + 1) = dist(i)
-                    idx(i + 1) = idx(i)
-                    i = i - 1
-                end do
-            
-                ! Insert the new element into the correct position
-                dist(i + 1) = temp_dist
-                idx(i + 1) = temp_idx
-            end subroutine shift_knn
+                ! The new value has replaced the root value (furthest) at index 1
+                ! dist(1), idx(1)
 
+                ! Heapify down from root to restore max-heap property (every parent bigger than its children)
+                i = 1
+                do
+                    left = 2 * i
+                    right = 2 * i + 1
+                    largest = i
+            
+                    if (left <= k .and. dist(left) > dist(largest)) largest = left
+                    if (right <= k .and. dist(right) > dist(largest)) largest = right
+            
+                    if (largest /= i) then
+                        ! Swap i-th element with largest
+                        tmp_dist = dist(i)
+                        dist(i) = dist(largest)
+                        dist(largest) = tmp_dist
+            
+                        tmp_idx = idx(i)
+                        idx(i) = idx(largest)
+                        idx(largest) = tmp_idx
+            
+                        i = largest
 
-            ! put element k in the right position using
-            ! a binary search (bisection of array)
-            ! Complexity is O(log(k))
-            subroutine binary_search_insert(dist, idx, k)
-                implicit none
-                !inout
-                real(kind=prec), intent(inout) :: dist(k)
-                integer(kind=intkind), intent(inout) :: idx(k)
-                integer, intent(in) :: k
-                !local
-                real(kind=prec):: temp_dist
-                integer(kind=intkind) :: temp_idx
-                integer :: i
-                integer :: low, high, mid
-            
-                ! Store the new element to be inserted
-                temp_dist = dist(k)
-                temp_idx = idx(k)
-                
-                ! Early exit: mew element is already in the correct position (LAST)
-                if (temp_dist >= dist(k-1)) then
-                    dist(k) = temp_dist
-                    idx(k) = temp_idx
-                    return
-                endif
-                
-                low = 1
-                high = k
-            
-                ! Shift elements greater than temp_dist to the right
-                do while (low <= high)
-                    mid = (low + high) / 2
-                    if (temp_dist > dist(mid)) then
-                        low = mid + 1
-                    else
-                        high = mid - 1
+                    else !already fulfills max-heap property
+                        exit
                     end if
                 end do
+            end subroutine max_heap_insert            
 
-                ! Shift all elements from low to k-1 to the right
-                do i = k - 1, low, -1
-                    dist(i + 1) = dist(i)
-                    idx(i + 1) = idx(i)
-                end do
-
-                !Put new value on the right position: low
-                dist(low) = temp_dist
-                idx(low) = temp_idx
-
-            end subroutine binary_search_insert
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     end subroutine knn_search_recursive
@@ -626,90 +588,6 @@ contains
     query%dist = dist
 
     deallocate(dist, idx)
-    
-    contains
-
-        ! Quicksort to sort the distances and indices
-        subroutine quicksort(dist, idx, n)
-            implicit none
-            !in/out
-            real(kind=prec), intent(inout) :: dist(n)    ! Distance array to be sorted
-            integer(kind=intkind), intent(inout) :: idx(n) ! Corresponding indices
-            integer, intent(in) :: n          ! Number of elements to sort
-            !local
-            integer :: low, high
-        
-            low = 1
-            high = n
-            call quicksort_recursive(dist, idx, low, high, n)
-        end subroutine quicksort    
-        
-        recursive subroutine quicksort_recursive(dist, idx, low, high, n)
-            implicit none
-            !in/out
-            integer, intent(in) :: n
-            real(kind=prec), intent(inout) :: dist(n)
-            integer(kind=intkind), intent(inout) :: idx(n)
-            integer, intent(in) :: low, high
-            !local
-            integer :: pivot_index
-
-            if (low < high) then
-                ! Partition the array and get the pivot index
-                call partition2(dist, idx, low, high, pivot_index, n)
-
-                ! Recursively sort the subarrays
-                call quicksort_recursive(dist, idx, low, pivot_index - 1, n)
-                call quicksort_recursive(dist, idx, pivot_index + 1, high, n)
-            end if
-            
-        end subroutine quicksort_recursive
-        
-        subroutine partition2(dist, idx, low, high, pivot_index, n)
-            implicit none
-            !in/out
-            integer, intent(in) :: n
-            real(kind=prec), intent(inout) :: dist(n)
-            integer(kind=intkind), intent(inout) :: idx(n)
-            integer, intent(in) :: low, high
-            integer, intent(out) :: pivot_index
-            !local
-            real(kind=prec):: pivot_value
-            integer :: i, j
-            real(kind=prec):: temp_dist
-            integer(kind=intkind) :: temp_idx
-
-            ! Choose the pivot (here, we use the last element)
-            pivot_value = dist(high)
-            i = low - 1
-
-            ! Partition the array
-            do j = low, high - 1
-                if (dist(j) <= pivot_value) then
-                    i = i + 1
-                    ! Swap dist(i) and dist(j)
-                    temp_dist = dist(i)
-                    dist(i) = dist(j)
-                    dist(j) = temp_dist
-                    ! Swap idx(i) and idx(j)
-                    temp_idx = idx(i)
-                    idx(i) = idx(j)
-                    idx(j) = temp_idx
-                end if
-            end do
-
-            ! Place the pivot in its correct position
-            i = i + 1
-            temp_dist = dist(i)
-            dist(i) = dist(high)
-            dist(high) = temp_dist
-            temp_idx = idx(i)
-            idx(i) = idx(high)
-            idx(high) = temp_idx
-
-            ! Return the pivot index
-            pivot_index = i
-        end subroutine partition2
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     end function ball_search
@@ -842,8 +720,7 @@ contains
         query%idx = idx
 
         ! Distances are not calculated in this function, hence dist is not allocated
-        ! query%dist => null()
-    
+
         deallocate(idx)
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1006,6 +883,93 @@ contains
         dist = sqrt(dx**2 + dy**2 + dz**2)
     end function distance
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    !Quicksort algorithm for sorting final lists in queries
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    subroutine quicksort(dist, idx, n)
+        implicit none
+        !in/out
+        real(kind=prec), intent(inout) :: dist(n)    ! Distance array to be sorted
+        integer(kind=intkind), intent(inout) :: idx(n) ! Corresponding indices
+        integer, intent(in) :: n          ! Number of elements to sort
+        !local
+        integer :: low, high
+    
+        low = 1
+        high = n
+        call quicksort_recursive(dist, idx, low, high, n)
+    end subroutine quicksort    
+    
+    recursive subroutine quicksort_recursive(dist, idx, low, high, n)
+        implicit none
+        !in/out
+        integer, intent(in) :: n
+        real(kind=prec), intent(inout) :: dist(n)
+        integer(kind=intkind), intent(inout) :: idx(n)
+        integer, intent(in) :: low, high
+        !local
+        integer :: pivot_index
+
+        if (low < high) then
+            ! Partition the array and get the pivot index
+            call partition2(dist, idx, low, high, pivot_index, n)
+
+            ! Recursively sort the subarrays
+            call quicksort_recursive(dist, idx, low, pivot_index - 1, n)
+            call quicksort_recursive(dist, idx, pivot_index + 1, high, n)
+        end if
+        
+    end subroutine quicksort_recursive
+    
+    subroutine partition2(dist, idx, low, high, pivot_index, n)
+        implicit none
+        !in/out
+        integer, intent(in) :: n
+        real(kind=prec), intent(inout) :: dist(n)
+        integer(kind=intkind), intent(inout) :: idx(n)
+        integer, intent(in) :: low, high
+        integer, intent(out) :: pivot_index
+        !local
+        real(kind=prec):: pivot_value
+        integer :: i, j
+        real(kind=prec):: temp_dist
+        integer(kind=intkind) :: temp_idx
+
+        ! Choose the pivot (here, we use the last element)
+        pivot_value = dist(high)
+        i = low - 1
+
+        ! Partition the array
+        do j = low, high - 1
+            if (dist(j) <= pivot_value) then
+                i = i + 1
+                ! Swap dist(i) and dist(j)
+                temp_dist = dist(i)
+                dist(i) = dist(j)
+                dist(j) = temp_dist
+                ! Swap idx(i) and idx(j)
+                temp_idx = idx(i)
+                idx(i) = idx(j)
+                idx(j) = temp_idx
+            end if
+        end do
+
+        ! Place the pivot in its correct position
+        i = i + 1
+        temp_dist = dist(i)
+        dist(i) = dist(high)
+        dist(high) = temp_dist
+        temp_idx = idx(i)
+        idx(i) = idx(high)
+        idx(high) = temp_idx
+
+        ! Return the pivot index
+        pivot_index = i
+    end subroutine partition2
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 !#######################################################
 end module cosmokdtree
