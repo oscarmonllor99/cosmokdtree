@@ -425,7 +425,7 @@ contains
                 if (dist_current < dist_kth + epsilon) then
                     dist(k) = dist_current
                     idx(k) = node%leaf_indices(i)
-                    call shift_knn(dist, idx, k)
+                    call binary_search_insert(dist, idx, k)
                 end if
             end do
 
@@ -439,7 +439,7 @@ contains
             if (dist_current < dist_kth + epsilon) then
                 dist(k) = dist_current
                 idx(k) = node%index
-                call shift_knn(dist, idx, k)
+                call binary_search_insert(dist, idx, k)
             end if
 
             axis = node%axis
@@ -510,6 +510,58 @@ contains
                 dist(i + 1) = temp_dist
                 idx(i + 1) = temp_idx
             end subroutine shift_knn
+
+
+            ! put element k in the right position using
+            ! a binary search (bisection of array)
+            ! Complexity is O(log(k))
+            subroutine binary_search_insert(dist, idx, k)
+                implicit none
+                !inout
+                real(kind=prec), intent(inout) :: dist(k)
+                integer(kind=intkind), intent(inout) :: idx(k)
+                integer, intent(in) :: k
+                !local
+                real(kind=prec):: temp_dist
+                integer(kind=intkind) :: temp_idx
+                integer :: i
+                integer :: low, high, mid
+            
+                ! Store the new element to be inserted
+                temp_dist = dist(k)
+                temp_idx = idx(k)
+                
+                ! Early exit: mew element is already in the correct position (LAST)
+                if (temp_dist >= dist(k-1)) then
+                    dist(k) = temp_dist
+                    idx(k) = temp_idx
+                    return
+                endif
+                
+                low = 1
+                high = k
+            
+                ! Shift elements greater than temp_dist to the right
+                do while (low <= high)
+                    mid = (low + high) / 2
+                    if (temp_dist > dist(mid)) then
+                        low = mid + 1
+                    else
+                        high = mid - 1
+                    end if
+                end do
+
+                ! Shift all elements from low to k-1 to the right
+                do i = k - 1, low, -1
+                    dist(i + 1) = dist(i)
+                    idx(i + 1) = idx(i)
+                end do
+
+                !Put new value on the right position: low
+                dist(low) = temp_dist
+                idx(low) = temp_idx
+
+            end subroutine binary_search_insert
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     end subroutine knn_search_recursive
