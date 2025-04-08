@@ -199,9 +199,10 @@ contains
     integer, intent(in) :: max_depth ! max_depth to allow parallelism
     integer, intent(in) :: leafsize ! size of leaf nodes
     integer :: axis !axis to split points
+    real(kind=prec) :: var(3) ! variance of the points in each axis
     type(KDTreeNode), pointer :: node   ! New node to be created
     real(kind=prec):: kth_point(size(points, 2)) ! median point
-    integer(kind=intkind) :: median ! half size of data
+    integer(kind=intkind) :: median, median_approx ! half size of data
     integer(kind=intkind) :: kth_index ! index of the median point
 
     if (size(points, 1) == 0) then
@@ -209,12 +210,17 @@ contains
         return
     end if
 
-    !alternate axis across depth
-    axis = mod(depth, 3)
+    ! Splitting axis: maximum variance
+    var(1) = variance(points, 0) ! variance in x
+    var(2) = variance(points, 1) ! variance in y
+    var(3) = variance(points, 2) ! variance in z
+    axis = 0
+    if (var(2) > var(1)) axis = 1
+    if (var(3) > var(2)) axis = 2
 
     ! Find median and partition points
     median = size(points, 1, kind=intkind) / 2 + 1
-    call quickselect(points, indices, median, axis, kth_point, kth_index)
+    call quickselect(points, indices, median, axis, kth_point, kth_index, median_approx)
 
     ! Allocate node
     allocate(node)
@@ -245,18 +251,18 @@ contains
     !$OMP SINGLE
 
     !$OMP TASK
-    node%left => build_kdtree_recursive(points(1:median-1,:),indices(1:median-1),depth+1,max_depth,leafsize)
+    node%left => build_kdtree_recursive(points(1:median_approx-1,:),indices(1:median_approx-1),depth+1,max_depth,leafsize)
     !$OMP END TASK
 
     !$OMP TASK
-    node%right => build_kdtree_recursive(points(median+1:,:),indices(median+1:),depth+1,max_depth,leafsize)
+    node%right => build_kdtree_recursive(points(median_approx+1:,:),indices(median_approx+1:),depth+1,max_depth,leafsize)
     !$OMP END TASK
 
     !$OMP END SINGLE
     !$OMP END PARALLEL
     else
-    node%left => build_kdtree_recursive(points(1:median-1,:),indices(1:median-1),depth+1,max_depth,leafsize)
-    node%right => build_kdtree_recursive(points(median+1:,:),indices(median+1:),depth+1,max_depth,leafsize)
+    node%left => build_kdtree_recursive(points(1:median_approx-1,:),indices(1:median_approx-1),depth+1,max_depth,leafsize)
+    node%right => build_kdtree_recursive(points(median_approx+1:,:),indices(median_approx+1:),depth+1,max_depth,leafsize)
     end if
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -264,31 +270,60 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    function variance(points, axis) result(var)
+        implicit none
+        real(kind=prec), intent(in) :: points(:, :)      ! 2D array of points
+        integer, intent(in) :: axis             ! Axis to calculate variance (0 for x, 1 for y, 2 for z)
+        real(kind=prec) :: var, sum, sum_sq
+        integer(kind=intkind) :: n, i
+
+        sum = 0.
+        sum_sq = 0.
+        n = size(points, 1, intkind)
+
+        do i = 1, n
+            sum = sum + points(i, axis + 1)
+            sum_sq = sum_sq + points(i, axis + 1)**2
+        end do
+
+        var = sum_sq / n - (sum / n)**2
+    end function variance
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ! Quickselect function to find the k-th smallest element along a specified axis
     ! Ensures all points below k are less than or equal to the k-th point
     ! and all points above k are greater than or equal to the k-th point with the
     ! specified axis.
-    subroutine quickselect(points, indices, k, axis, kth_point, kth_index)
+    subroutine quickselect(points, indices, k, axis, kth_point, kth_index, k_exit)
         implicit none
+        !in
         real(kind=prec), intent(inout) :: points(:, :)      ! 2D array of points
         integer(kind=intkind), intent(inout) :: indices(:) ! 1D array of indices
         integer(kind=intkind), intent(in) :: k         ! k-th smallest element to find
         integer, intent(in) :: axis             ! Axis to sort along (0 for x, 1 for y, 2 for z)
+        !local
+        integer(kind=intkind) :: left, right, pivot_index
+        integer(kind=intkind) :: k_up, k_down
+        !out
         real(kind=prec), intent(out) :: kth_point(size(points, 2))  ! The k-th smallest point
         integer(kind=intkind), intent(out) :: kth_index        ! Index of the k-th smallest point
-        integer(kind=intkind) :: left, right, pivot_index
-    
+        integer(kind=intkind) :: k_exit
+        
         left = 1
         right = size(points, 1, intkind)
-    
+        k_up = k + int(0.2 * size(points, 1, intkind))
+        k_down = k - int(0.2 * size(points, 1, intkind))
+        
         do while (left <= right)
             ! Partition the array and get the pivot index
             pivot_index = partition(points, indices, left, right, axis)
-    
-            if (pivot_index == k) then
+            ! Early exit if the pivot index is within some error margin of k
+            if (pivot_index >= k_down .and. pivot_index <= k_up) then
                 ! Found the k-th smallest element
                 kth_point = points(pivot_index, :)
                 kth_index = indices(pivot_index)
+                k_exit = pivot_index
                 return
             else if (pivot_index < k) then
                 ! Search the right subarray
