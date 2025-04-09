@@ -615,15 +615,15 @@ contains
         call move_alloc(temp_dist, dist)
         temp_idx = idx(1:count_idx)
         call move_alloc(temp_idx, idx)
-        ! Last step, sort the distances
+        ! Last step, sort the distances (slightly decreases performance)
         call quicksort(dist, idx, size(idx))
+
     end if
 
     query%idx = idx
     query%dist = dist
 
     deallocate(dist, idx)
-
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     end function ball_search
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -861,7 +861,7 @@ contains
             if (count == size(indices)) then
                 ! Resize the array
                 n = size(indices)
-                allocate(temp(10 * n))
+                allocate(temp(2 * n))
                 temp(1:n) = indices
                 call move_alloc(temp, indices)
             end if
@@ -888,7 +888,7 @@ contains
             if (count == size(dist)) then
                 ! Resize the array by doubling its size
                 n = size(dist)
-                allocate(temp(10 * n))
+                allocate(temp(2 * n))
                 temp(1:n) = dist
                 call move_alloc(temp, dist)
             end if
@@ -934,77 +934,90 @@ contains
     
         low = 1
         high = n
-        call quicksort_recursive(dist, idx, low, high, n)
+        call quicksort_recursive(dist, idx, low, high)
     end subroutine quicksort    
     
-    recursive subroutine quicksort_recursive(dist, idx, low, high, n)
+    recursive subroutine quicksort_recursive(dist, idx, low, high)
         implicit none
         !in/out
-        integer, intent(in) :: n
-        real(kind=prec), intent(inout) :: dist(n)
-        integer(kind=intkind), intent(inout) :: idx(n)
+        real(kind=prec), intent(inout) :: dist(:)
+        integer(kind=intkind), intent(inout) :: idx(:)
         integer, intent(in) :: low, high
         !local
         integer :: pivot_index
 
         if (low < high) then
             ! Partition the array and get the pivot index
-            call partition2(dist, idx, low, high, pivot_index, n)
+            call partition2(dist, idx, low, high, pivot_index)
 
             ! Recursively sort the subarrays
-            call quicksort_recursive(dist, idx, low, pivot_index - 1, n)
-            call quicksort_recursive(dist, idx, pivot_index + 1, high, n)
+            call quicksort_recursive(dist, idx, low, pivot_index - 1)
+            call quicksort_recursive(dist, idx, pivot_index + 1, high)
         end if
-        
+ 
     end subroutine quicksort_recursive
-    
-    subroutine partition2(dist, idx, low, high, pivot_index, n)
+
+    subroutine partition2(dist, idx, low, high, pivot_index)
         implicit none
         !in/out
-        integer, intent(in) :: n
-        real(kind=prec), intent(inout) :: dist(n)
-        integer(kind=intkind), intent(inout) :: idx(n)
+        real(kind=prec), intent(inout) :: dist(:)
+        integer(kind=intkind), intent(inout) :: idx(:)
         integer, intent(in) :: low, high
         integer, intent(out) :: pivot_index
         !local
+        integer :: mid
         real(kind=prec):: pivot_value
         integer :: i, j
-        real(kind=prec):: temp_dist
-        integer(kind=intkind) :: temp_idx
 
-        ! Choose the pivot (here, we use the last element)
-        pivot_value = dist(high)
+        ! Choose the pivot (median of low, mid, high)
+        mid = (low + high) / 2
+
+        ! Find median of low, mid, high
+        if (dist(low) > dist(mid)) call swap2(dist, idx, low, mid)
+        if (dist(low) > dist(high)) call swap2(dist, idx, low, high)
+        if (dist(mid) > dist(high)) call swap2(dist, idx, mid, high)
+        ! Now dist(low) <= dist(mid) <= dist(high)
+        pivot_value = dist(mid)
+        ! Move pivot to the end
+        call swap2(dist, idx, mid, high)
+
         i = low - 1
 
         ! Partition the array
         do j = low, high - 1
             if (dist(j) <= pivot_value) then
                 i = i + 1
-                ! Swap dist(i) and dist(j)
-                temp_dist = dist(i)
-                dist(i) = dist(j)
-                dist(j) = temp_dist
-                ! Swap idx(i) and idx(j)
-                temp_idx = idx(i)
-                idx(i) = idx(j)
-                idx(j) = temp_idx
+                call swap2(dist, idx, i, j)
             end if
         end do
 
         ! Place the pivot in its correct position
         i = i + 1
-        temp_dist = dist(i)
-        dist(i) = dist(high)
-        dist(high) = temp_dist
-        temp_idx = idx(i)
-        idx(i) = idx(high)
-        idx(high) = temp_idx
+        call swap2(dist, idx, i, high)
 
         ! Return the pivot index
         pivot_index = i
     end subroutine partition2
-    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    subroutine swap2(dist, idx, i, j)
+        implicit none
+        real(kind=prec), intent(inout) :: dist(:)
+        integer(kind=intkind), intent(inout) :: idx(:)
+        integer(kind=intkind), intent(in) :: i, j
+        real(kind=prec):: temp_dist
+        integer(kind=intkind) :: temp_idx
+
+        ! Swap dist
+        temp_dist = dist(i)
+        dist(i) = dist(j)
+        dist(j) = temp_dist
+
+        ! Swap idx
+        temp_idx = idx(i)
+        idx(i) = idx(j)
+        idx(j) = temp_idx
+    end subroutine swap2
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 !#######################################################
 end module cosmokdtree
