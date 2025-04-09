@@ -567,13 +567,14 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ! Search for points within a given radius
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    function ball_search(node, targett, radius) result(query)
+    function ball_search(node, targett, radius, sorted) result(query)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     implicit none
     !in
     real(kind=prec):: radius ! Radius of the ball
     type(KDTreeNode), pointer, intent(in) :: node
     real(kind=prec), intent(in) :: targett(3)
+    logical, intent(in), optional :: sorted ! If true, sort the points by distance to the target
     !local
     integer :: init_depth = 0
     integer :: count_idx, count_dist ! Counters for the number of elements in idx and dist
@@ -616,7 +617,11 @@ contains
         temp_idx = idx(1:count_idx)
         call move_alloc(temp_idx, idx)
         ! Last step, sort the distances (slightly decreases performance)
-        call quicksort(dist, idx, size(idx))
+        if ( present(sorted) ) then 
+            if (sorted) then
+                call quicksort(dist, idx, count_dist)
+            end if
+        endif
 
     end if
 
@@ -1003,7 +1008,7 @@ contains
         implicit none
         real(kind=prec), intent(inout) :: dist(:)
         integer(kind=intkind), intent(inout) :: idx(:)
-        integer(kind=intkind), intent(in) :: i, j
+        integer, intent(in) :: i, j
         real(kind=prec):: temp_dist
         integer(kind=intkind) :: temp_idx
 
