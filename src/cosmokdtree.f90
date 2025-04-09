@@ -397,13 +397,14 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     !k-nearest neighbor search
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    function knn_search(node, targett, k) result(query)
+    function knn_search(node, targett, k, sorted) result(query)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         implicit none
         !in
         integer, intent(in) :: k ! Number of nearest neighbors to find
         type(KDTreeNode), pointer, intent(in) :: node
         real(kind=prec), intent(in) :: targett(3)
+        logical, intent(in), optional :: sorted ! If true, sort the points by distance to the target
         !local
         integer :: init_depth = 0
         !out
@@ -418,7 +419,14 @@ contains
         call knn_search_recursive(node, init_depth, targett, dist, idx, k)
 
         !Perform full sort with quicksort
-        call quicksort(dist, idx, k)
+        ! by default, sorts
+        if ( present(sorted) ) then 
+            if (sorted) then
+                call quicksort(dist, idx, k)
+            end if
+        else
+            call quicksort(dist, idx, k)
+        endif
 
         query%idx = idx
         query%dist = dist
