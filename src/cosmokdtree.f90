@@ -1,43 +1,47 @@
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-! kd-tree module
+! cosmokdtree module
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! GRUP DE COSMOLOGIA COMPUTACIONAL (GCC) UNIVERSITAT DE VALÈNCIA
 ! Authors: Óscar Monllor Berbegal and David Vallés Pérez
 ! Date: 30/01/2025
-! Last update: 04/05/2025
+! Last update: 10/05/2025
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! Brief description:
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! - This module implements an optimized parallel k-d tree construction and 
-!   search for k-nearest neighbors and points within a given radius.
+!   fast search for k-nearest neighbors and range queries.
 !
-! - Quickselect is used to find the point that splits the space
+! - (Lazy)Quickselect is used to find the point that splits the space
 !   in two halves along a given axis (median). Use of median ensures 
-!   that the tree is balanced.
+!   that the tree is balanced. Maximum variance is used to select the
+!   splitting axis at each level.
 !
-! - The tree is built recursively, with the splitting axis changing
-!   at each level (x, y, z, x, y, z, ...). The tree is built in parallel 
-!   using OpenMP tasks due to Divide and Conquer nature of the algorithm.
+! - The tree is built in parallel using OpenMP tasks due 
+!   to Divide and Conquer nature of the algorithm. Nested parallelism
+!   must be enabled in OpenMP to allow parallelism at the top levels.
 !
-! - The search for k-nearest neighbors uses an insertion shiftdown 
-!   too quickly sort and replace the nearest neighbours found.
+! - The search for k-nearest neighbors uses a Max-Heap storage
+!   to efficiently keep track of the k nearest points, easily
+!   removing the furthest point when a closest point is found.
+!   
+! - Quicksort is used to sort the distances and indices of    
+!   points in the final knn_search max_heap and range queries results.
+!   We have seen that even having an already existing max_heap structure,
+!   quicksort outperforms heapsort by a 10-20% factor.
 !
-! - quicksort is used to sort the distances and indices of    
-!   points within a given radius
+! - For knn (ball) queries, the results are sorted (unsorted) by default.
+!
+! - INT*8 indices and REAL*8 points are allowed through conditional compilation
+!
+! - Similarly, periodic boundary conditions are allowed
+!
+! - Dimensionality is set to 3 by default, but can be changed to an
+!   arbitrary value (e.g. 6D phase space).
 !
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! Pending improvements:
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-! - knn-search relies on shiftdown to sort the distances and indices, which
-!   has O(k) complexity. This can be improved by using a priority queue (heap).
-!
-! - Makefile
-!
-! - Periodic boundary conditions
-!
 ! - Better parallelism for tree building (if possible)
-!
-! - Better neighbour search (e.g. binary search, or heap...)
 !
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -48,6 +52,11 @@ module cosmokdtree
     private  
     public :: build_kdtree, KDTreeNode, KDTreeResult, knn_search, ball_search, &
                box_search
+
+    !+++++++++++++++++++++++++++++++
+    !++++ Dimensionality
+    !+++++++++++++++++++++++++++++++              
+    integer, parameter :: ndim = 3 ! Number of dimensions (2D, 3D, ...)
 
     !+++++++++++++++++++++++++++++++
     !++++ Precision and integer kind
@@ -69,9 +78,9 @@ module cosmokdtree
     !+++++++++++++++++++++++++++++++
     type :: KDTreeNode
         !basic ---------------------
-        real(kind=prec):: point(3)       ! 3D point (x, y, z)
+        real(kind=prec) :: point(ndim) ! k-D point (x, y, z, ...)
         integer(kind=intkind) :: index       ! Index of the point within the original array
-        integer :: axis        ! Splitting axis (0 for x, 1 for y, 2 for z)
+        integer :: axis ! Splitting axis (1 for x, 2 for y, 3 for z, 4 for w, ...)
         type(KDTreeNode), pointer :: left => null()  ! Left child
         type(KDTreeNode), pointer :: right => null() ! Right child
         !leaf, for faster search and building
@@ -88,7 +97,7 @@ module cosmokdtree
 
 #if periodic == 1
     ! Box size (periodic boundary conditions), global variable
-    real(kind=prec):: L(3) ! Will be initialized in build_kdtree
+    real(kind=prec) :: L(ndim) ! Will be initialized in build_kdtree
 #endif
 
 contains
@@ -97,43 +106,47 @@ contains
     ! Initialize kd-tree construction
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #if periodic == 1
-    function build_kdtree(x, y, z, Lx, Ly, Lz) result(tree)
+    function build_kdtree(points_in, L_in) result(tree)
 #else
-    function build_kdtree(x, y, z) result(tree)
+    function build_kdtree(points_in) result(tree)
 #endif
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         use omp_lib
         implicit none
-        real(kind=prec), intent(in) :: x(:), y(:), z(:)
+        !in
+        real(kind=prec), intent(in) :: points_in(:, :)
 #if periodic == 1
-        real(kind=prec), intent(in) :: Lx, Ly, Lz
+        real(kind=prec), intent(in) :: L_in(:)
         integer :: flag_stop
 #endif
+        !local
         real(kind=prec), allocatable :: points(:, :)
         integer(kind=intkind), allocatable :: indices(:)
         integer(kind=intkind) :: n, i
         integer :: depth, max_depth, nproc, leafsize
+        integer :: j
+        !out
         type(KDTreeNode), pointer :: tree
     
         ! Enable nested parallelism
         call omp_set_nested(.true.) 
     
         ! Number of points
-        n = size(x, kind=intkind)
+        n = size(points_in, 1, kind=intkind)
 
 # if periodic == 1
         ! Set the box size (global variable of the module)
-        L = [Lx, Ly, Lz]
-
-        ! Check all points are within (-Lx/2, Lx/2)
+        L = Lin
+    
+        ! Check all points are within (-L/2, L/2)
         flag_stop = 0
-        !$OMP PARALLEL SHARED(x,y,z,n,Lx,Ly,Lz), &
-        !$OMP PRIVATE(i)
+        !$OMP PARALLEL SHARED(points,n,L,ndim), &
+        !$OMP PRIVATE(i,j)
         !$OMP DO REDUCTION(+:flag_stop)
-        do i=1,n
-            if(x(i) .lt. -Lx/2 .or. x(i) .gt. Lx/2) flag_stop = 1
-            if(y(i) .lt. -Ly/2 .or. y(i) .gt. Ly/2) flag_stop = 1
-            if(z(i) .lt. -Lz/2 .or. z(i) .gt. Lz/2) flag_stop = 1
+        do j=1,ndim
+            do i=1,n
+                if (points(i,j) .lt. -L(j)/2 .or. points(i,j) .gt. L(j)/2) flag_stop = 1
+            enddo
         enddo
         !$OMP ENDDO
         !$OMP END PARALLEL
@@ -141,15 +154,10 @@ contains
         if (flag_stop .gt. 0) STOP 'Points outside (-L/2, L/2) range !!'
 # endif
 
-        ! 3D points array
-        allocate(points(n, 3))
+        ! Initialize global indices and points
+        allocate(points(n, ndim))
+        points = points_in
         allocate(indices(n))
-
-        points(:, 1) = x
-        points(:, 2) = y
-        points(:, 3) = z
-
-        ! Initialize global indices
         indices = [(i, i=1, n)]
         
         ! Init depth = 0
@@ -193,15 +201,17 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     use omp_lib
     implicit none
-    real(kind=prec), intent(inout) :: points(:, :)      ! 2D array of points
+    !in
+    real(kind=prec), intent(inout) :: points(:, :) ! 2D array of points
     integer(kind=intkind), intent(inout) :: indices(:) ! 1D array of indices
-    integer, intent(in) :: depth         ! Current depth in the tree
+    integer, intent(in) :: depth ! Current depth in the tree
     integer, intent(in) :: max_depth ! max_depth to allow parallelism
     integer, intent(in) :: leafsize ! size of leaf nodes
-    integer :: axis !axis to split points
-    real(kind=prec) :: var(3) ! variance of the points in each axis
+    !local
+    integer :: axis, j !axis to split points
+    real(kind=prec) :: var(ndim) ! variance of the points in each axis
     type(KDTreeNode), pointer :: node   ! New node to be created
-    real(kind=prec):: kth_point(size(points, 2)) ! median point
+    real(kind=prec):: kth_point(ndim) ! median point
     integer(kind=intkind) :: median, median_approx ! half size of data
     integer(kind=intkind) :: kth_index ! index of the median point
 
@@ -210,13 +220,11 @@ contains
         return
     end if
 
-    ! Splitting axis: maximum variance
-    var(1) = variance(points, 0) ! variance in x
-    var(2) = variance(points, 1) ! variance in y
-    var(3) = variance(points, 2) ! variance in z
-    axis = 0
-    if (var(2) > var(1)) axis = 1
-    if (var(3) > var(2)) axis = 2
+    ! Find the axis with the maximum variance
+    do j=1,ndim
+        var(j) = variance(points, j) ! variance in x, y, z, ...
+    enddo
+    axis = maxloc(var, dim=1) ! Find the axis with maximum variance
 
     ! Find median and partition points
     median = size(points, 1, kind=intkind) / 2 + 1
@@ -232,7 +240,7 @@ contains
     if (size(points, 1, kind=intkind) <= leafsize) then
         node%is_leaf = 1
         ! Store all points and indices in the leaf node
-        allocate(node%leaf_points(size(points, 1, kind=intkind), size(points, 2)))
+        allocate(node%leaf_points(size(points, 1, kind=intkind), ndim))
         allocate(node%leaf_indices(size(points, 1, kind=intkind)))
         node%leaf_points = points
         node%leaf_indices = indices
@@ -272,8 +280,8 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     function variance(points, axis) result(var)
         implicit none
-        real(kind=prec), intent(in) :: points(:, :)      ! 2D array of points
-        integer, intent(in) :: axis             ! Axis to calculate variance (0 for x, 1 for y, 2 for z)
+        real(kind=prec), intent(in) :: points(:, :) ! 2D array of points
+        integer, intent(in) :: axis  ! Axis to calculate variance (0 for x, 1 for y, 2 for z, ...)
         real(kind=prec) :: var, sum, sum_sq
         integer(kind=intkind) :: n, i
 
@@ -282,8 +290,8 @@ contains
         n = size(points, 1, intkind)
 
         do i = 1, n
-            sum = sum + points(i, axis + 1)
-            sum_sq = sum_sq + points(i, axis + 1)**2
+            sum = sum + points(i, axis)
+            sum_sq = sum_sq + points(i, axis)**2
         end do
 
         var = sum_sq / n - (sum / n)**2
@@ -298,27 +306,27 @@ contains
     subroutine quickselect(points, indices, k, axis, kth_point, kth_index, k_exit)
         implicit none
         !in
-        real(kind=prec), intent(inout) :: points(:, :)      ! 2D array of points
+        real(kind=prec), intent(inout) :: points(:, :) ! 2D array of points
         integer(kind=intkind), intent(inout) :: indices(:) ! 1D array of indices
-        integer(kind=intkind), intent(in) :: k         ! k-th smallest element to find
-        integer, intent(in) :: axis             ! Axis to sort along (0 for x, 1 for y, 2 for z)
+        integer(kind=intkind), intent(in) :: k ! k-th smallest element to find
+        integer, intent(in) :: axis  ! Axis to sort along (0 for x, 1 for y, 2 for z, ...)
         !local
         integer(kind=intkind) :: left, right, pivot_index
         integer(kind=intkind) :: k_up, k_down
         !out
-        real(kind=prec), intent(out) :: kth_point(size(points, 2))  ! The k-th smallest point
-        integer(kind=intkind), intent(out) :: kth_index        ! Index of the k-th smallest point
+        real(kind=prec), intent(out) :: kth_point(ndim) ! The k-th smallest point
+        integer(kind=intkind), intent(out) :: kth_index ! Index of the k-th smallest point
         integer(kind=intkind) :: k_exit
         
         left = 1
         right = size(points, 1, intkind)
-        k_up = k + int(0.2 * size(points, 1, intkind))
-        k_down = k - int(0.2 * size(points, 1, intkind))
+        k_up = k + int(0.05 * size(points, 1, intkind))
+        k_down = k - int(0.05 * size(points, 1, intkind))
         
         do while (left <= right)
             ! Partition the array and get the pivot index
             pivot_index = partition(points, indices, left, right, axis)
-            ! Early exit if the pivot index is within some error margin of k
+            ! Early exit if the pivot index is within some error of k
             if (pivot_index >= k_down .and. pivot_index <= k_up) then
                 ! Found the k-th smallest element
                 kth_point = points(pivot_index, :)
@@ -342,16 +350,16 @@ contains
     ! Partition function for Quickselect
     function partition(points, indices, left, right, axis) result(pivot_index)
         implicit none
-        real(kind=prec), intent(inout) :: points(:, :)      ! 2D array of points
+        real(kind=prec), intent(inout) :: points(:, :)  ! 2D array of points
         integer(kind=intkind), intent(inout) :: indices(:) ! 1D array of indices
         integer(kind=intkind), intent(in) :: left, right  ! Left and right bounds of the partition
-        integer, intent(in) :: axis             ! Axis to sort along (0 for x, 1 for y, 2 for z)
+        integer, intent(in) :: axis ! Axis to sort along (0 for x, 1 for y, 2 for z)
         integer(kind=intkind) :: pivot_index, i, j
         real(kind=prec):: pivot_value
     
         ! Choose pivot as the middle element
         pivot_index = (left + right) / 2
-        pivot_value = points(pivot_index, axis + 1)
+        pivot_value = points(pivot_index, axis)
     
         ! Move pivot to the end
         call swap(points, indices, pivot_index, right)
@@ -360,7 +368,7 @@ contains
     
         ! Move all elements smaller than or equal to pivot to the left
         do j = left, right - 1
-            if (points(j, axis + 1) <= pivot_value) then
+            if (points(j, axis) <= pivot_value) then
                 i = i + 1
                 call swap(points, indices, i, j)
             end if
@@ -378,7 +386,7 @@ contains
         real(kind=prec), intent(inout) :: points(:, :)
         integer(kind=intkind), intent(inout) :: indices(:)
         integer(kind=intkind), intent(in) :: i, j
-        real(kind=prec):: temp_point(size(points, 2))
+        real(kind=prec):: temp_point(ndim)
         integer(kind=intkind) :: temp_index
     
         ! Swap points
@@ -403,7 +411,7 @@ contains
         !in
         integer, intent(in) :: k ! Number of nearest neighbors to find
         type(KDTreeNode), pointer, intent(in) :: node
-        real(kind=prec), intent(in) :: targett(3)
+        real(kind=prec), intent(in) :: targett(ndim) ! Target point (k-D)
         logical, intent(in), optional :: sorted ! If true, sort the points by distance to the target
         !local
         integer :: init_depth = 0
@@ -443,7 +451,7 @@ contains
         !in
         integer :: k ! Number of nearest neighbors to find
         type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
-        real(kind=prec), intent(in) :: targett(3)                 ! Target point (3D)
+        real(kind=prec), intent(in) :: targett(ndim) ! Target point (k-D)
         integer, intent(in) :: depth     
         !local
         real(kind=prec), intent(inout) :: dist(k)  
@@ -454,7 +462,7 @@ contains
         integer :: axis
         logical :: look_opposite
         ! Temporary point for contiguous memory access
-        real(kind=prec):: temp_point(3)
+        real(kind=prec):: temp_point(ndim)
 
         if (.not. associated(node)) return
 
@@ -490,7 +498,7 @@ contains
 
             axis = node%axis
             ! 1D distance from target to the splitting plane
-            d1d = targett(axis+1) - node%point(axis+1)
+            d1d = targett(axis) - node%point(axis)
             ! Recursively search the subtree that contains the target
             if (d1d < 0) then
                 call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
@@ -499,7 +507,7 @@ contains
                 look_opposite = .false.
                 if (abs(d1d) < dist_furthest) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) - dist_furthest <= -L(axis+1) / 2. ) look_opposite = .true.
+                if (targett(axis) - dist_furthest <= -L(axis) / 2. ) look_opposite = .true.
 #endif
                 if (look_opposite .eqv. .true.) then
                     call knn_search_recursive(node%right, depth + 1, targett, dist, idx, k)
@@ -511,7 +519,7 @@ contains
                 look_opposite = .false.
                 if (abs(d1d) < dist_furthest) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) + dist_furthest >= L(axis+1) / 2. ) look_opposite = .true.
+                if (targett(axis) + dist_furthest >= L(axis) / 2. ) look_opposite = .true.
 #endif
                 if (look_opposite .eqv. .true.) then
                     call knn_search_recursive(node%left, depth + 1, targett, dist, idx, k)
@@ -581,7 +589,7 @@ contains
     !in
     real(kind=prec):: radius ! Radius of the ball
     type(KDTreeNode), pointer, intent(in) :: node
-    real(kind=prec), intent(in) :: targett(3)
+    real(kind=prec), intent(in) :: targett(ndim) ! Target point (k-D)
     logical, intent(in), optional :: sorted ! If true, sort the points by distance to the target
     !local
     integer :: init_depth = 0
@@ -649,7 +657,7 @@ contains
         !in
         real(kind=prec):: radius ! Radius of the ball
         type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
-        real(kind=prec), intent(in) :: targett(3)                 ! Target point (3D)
+        real(kind=prec), intent(in) :: targett(ndim) ! Target point (k-D)
         integer, intent(in) :: depth     
         !out
         integer(kind=intkind), allocatable, intent(inout) :: idx(:)  ! Index of the points within the radius
@@ -662,7 +670,7 @@ contains
         real(kind=prec):: epsilon = 1.e-6
         logical :: look_opposite
         ! Temporary point for contiguous memory access
-        real(kind=prec):: temp_point(3)
+        real(kind=prec):: temp_point(ndim)
 
         if (.not. associated(node)) then
             return
@@ -693,7 +701,7 @@ contains
 
             axis = node%axis
             ! 1D distance from target to the splitting plane
-            d1d = targett(axis+1) - node%point(axis+1)
+            d1d = targett(axis) - node%point(axis)
             ! Recursively search the subtree that contains the target
             if (d1d < 0) then
                 call ball_search_recursive(node%left, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
@@ -701,7 +709,7 @@ contains
                 look_opposite = .false.
                 if (abs(d1d) <= radius) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) - radius <= -L(axis+1) / 2. ) look_opposite = .true.
+                if (targett(axis) - radius <= -L(axis) / 2. ) look_opposite = .true.
 #endif
                 if (look_opposite .eqv. .true.) then
                     call ball_search_recursive(node%right, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
@@ -711,7 +719,7 @@ contains
                 look_opposite = .false.
                 if (abs(d1d) <= radius) look_opposite = .true.
 #if periodic == 1
-                if (targett(axis+1) + radius >= L(axis+1) / 2. ) look_opposite = .true.
+                if (targett(axis) + radius >= L(axis) / 2. ) look_opposite = .true.
 #endif
                 if (look_opposite .eqv. .true.) then
                     call ball_search_recursive(node%left, depth + 1, targett, dist, idx, radius, count_idx, count_dist)
@@ -732,7 +740,7 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         implicit none
         !in
-        real(kind=prec) :: box(6) ! Box limits (xmin, xmax, ymin, ymax, zmin, zmax)
+        real(kind=prec) :: box(2*ndim) ! Box limits (xmin, xmax, ymin, ymax, zmin, zmax,...)
         type(KDTreeNode), pointer, intent(in) :: node
         !local
         integer :: init_depth = 0
@@ -781,7 +789,7 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~	
         implicit none
         !in
-        real(kind=prec) :: box(6) ! Box limits (xmin, xmax, ymin, ymax, zmin, zmax)
+        real(kind=prec) :: box(2*ndim) ! Box limits (xmin, xmax, ymin, ymax, zmin, zmax,...)
         type(KDTreeNode), pointer, intent(in) :: node ! Starting node (usually the root)
         integer, intent(in) :: depth     
         !out
@@ -792,7 +800,7 @@ contains
         logical :: in_box ! tells if a point is inside the query box
         integer :: axis
         ! Temporary point for contiguous memory access
-        real(kind=prec):: temp_point(3)
+        real(kind=prec):: temp_point(ndim)
 
         if (.not. associated(node)) then
             return
@@ -824,11 +832,11 @@ contains
             ! Recursively search the subtrees intersecting the box
             ! Periodicity does not makes sense as the query box is assumed to be contained
             ! inside the (periodic) bounding box of all points
-            if (box(2*axis+1) < node%point(axis+1)) then
+            if (box(2*(axis-1)+1) < node%point(axis)) then
                 call box_search_recursive(node%left, depth + 1, idx, box, count_idx)
             endif
 
-            if (box(2*axis+2) > node%point(axis+1)) then
+            if (box(2*(axis-1)+2) > node%point(axis)) then
                 call box_search_recursive(node%right, depth + 1, idx, box, count_idx)
             endif
 
@@ -839,14 +847,20 @@ contains
         !subroutine to check if a point is inside the query box
         subroutine is_in_box(point, box, in_box)
             implicit none
-            real(kind=prec), intent(in) :: point(3) ! Point to check
-            real(kind=prec), intent(in) :: box(6)   ! Box limits (xmin, xmax, ymin, ymax, zmin, zmax)
-            logical, intent(out) :: in_box          ! Result: true if the point is inside the box
+            real(kind=prec), intent(in) :: point(ndim) ! Point to check
+            real(kind=prec), intent(in) :: box(2*ndim) ! Box limits (xmin, xmax, ymin, ymax, zmin, zmax,...)
+            logical, intent(out) :: in_box ! Result: true if the point is inside the box
+            !local
+            integer :: j
 
             in_box = .true.
-            if (point(1) < box(1) .or. point(1) > box(2)) in_box = .false.
-            if (point(2) < box(3) .or. point(2) > box(4)) in_box = .false.
-            if (point(3) < box(5) .or. point(3) > box(6)) in_box = .false.
+            do j=1,ndim
+                if (point(j) < box(2*j-1) .or. point(j) > box(2*j)) then
+                    in_box = .false.
+                    exit
+                end if
+            end do
+
         end subroutine is_in_box
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -917,18 +931,28 @@ contains
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     function distance(p1, p2) result(dist)
         implicit none
-        real(kind=prec), intent(in) :: p1(3), p2(3)
+        real(kind=prec), intent(in) :: p1(ndim), p2(ndim)
         real(kind=prec):: dist
-        real(kind=prec):: dx, dy, dz
-        dx = p1(1) - p2(1)
-        dy = p1(2) - p2(2)
-        dz = p1(3) - p2(3)
+        real(kind=prec):: dx(ndim)
+        !local
+        integer :: i
+
+        do i=1,ndim
+            dx(i) = p1(i) - p2(i)
+        end do
+
 #if periodic == 1
-        dx = min(abs(dx), L(1) - abs(dx))
-        dy = min(abs(dy), L(2) - abs(dy))
-        dz = min(abs(dz), L(3) - abs(dz))
+        do i=1,ndim
+            dx(i) = min(abs(dx(i)), L(i) - abs(d(i)))
+        end do
 #endif
-        dist = sqrt(dx**2 + dy**2 + dz**2)
+
+        dist = 0.
+        do i=1,ndim
+            dist = dist + dx(i)**2
+        end do
+        dist = sqrt(dist)
+
     end function distance
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
