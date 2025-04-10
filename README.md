@@ -3,9 +3,13 @@ Fortran 2003/2008 kd-tree implementation with OpenMP directives for parallel tre
 
 Here are some benchmarks and a comparison with other kd-tree implementations. The code is compiled by the GNU Fortran 11.4 compiler and is run on an AMD Ryzen Threadripper Pro 5965WX (24 core) CPU with 256 GB DDR4 of available RAM inside the Ubuntu 22.04 LTS operating system.
 
-![Alt text](benchmark/construction.png)
+![Alt text](benchmark/construction_uniform.png)
 
-![Alt text](benchmark/query.png)
+![Alt text](benchmark/query_uniform.png)
+
+![Alt text](benchmark/construction_anisotropic.png)
+
+![Alt text](benchmark/query_anisotropic.png)
 
 
 
