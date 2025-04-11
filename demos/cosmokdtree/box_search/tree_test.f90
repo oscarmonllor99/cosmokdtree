@@ -5,18 +5,33 @@ program main
 
     implicit none
 
+    !parameters
+    integer :: ncpu
     integer, parameter :: prec = 4 
     integer, parameter :: intkind = 4
 
+    !input data
+    real(kind=prec), allocatable :: x(:), y(:), z(:)
+    real(kind=prec), allocatable :: points(:,:)
+    integer(kind=intkind) :: n
+    
+    !tree results
     type(KDTreeNode), pointer :: root
     type(KDTreeResult) :: query
-    real(kind=prec), allocatable :: x(:), y(:), z(:)
-    integer(kind=intkind) :: n, i
-    integer :: count, count2
-    integer :: ncpu
-    integer :: t1, t2, trate, tmax
-    integer(kind=intkind), allocatable :: indices(:), indices_BF(:)
+    integer(kind=intkind), allocatable :: indices(:)
+    real(kind=prec), allocatable :: dist(:)
+
+    !time
+    integer*8 :: t1, t2, trate, tmax
+
+    !queries
     real(kind=prec) :: box(6)
+    real(kind=prec) :: ball_radius
+    integer :: k, nquery, ninside
+
+    !brute-force check
+    integer :: i, nin
+    integer(kind=intkind), allocatable :: indices_bf(:)
 
     ! Get the number of threads
     !$OMP PARALLEL
@@ -27,8 +42,8 @@ program main
     print *, "Number of threads:", ncpu
 
     ! Number of points (can be larger than INT*4 limit: 2,147,483,647)
-    n = 50000000
-    print *, "Number of points:", n
+    n = 10000000
+    print *, "Number of points:", n, " (", n/1000000, "M)"
 
     ! Allocate and initialize points (example: random points)
     call system_clock(t1,trate,tmax)
@@ -39,50 +54,52 @@ program main
           z(i) = (rand()-0.5) * 100  ! Random z-coordinate
     end do
     CALL system_clock(t2,trate,tmax)
-    WRITE(*,*) "Time taken to generate random points:", float(t2 - t1)/1e3, "seconds"
+    WRITE(*,*) "Time taken to generate random points:", float(t2 - t1)/float(trate), "seconds"
+    allocate(points(n,3))
+    points(:,1) = x
+    points(:,2) = y
+    points(:,3) = z
 
-    
     ! Build the KD-Tree
     call system_clock(t1,trate,tmax)
-    root => build_kdtree(x, y, z)
+    root => build_kdtree(points)
     call system_clock(t2,trate,tmax)
-    WRITE(*,*) "Time taken to build KD-Tree:", float(t2 - t1)/1e3, "seconds"
+    WRITE(*,*) "Time taken to build KD-Tree:", float(t2 - t1)/float(trate), "seconds"
 
-    ! Box query the tree
-    ! Query box
-    box = [-20., 20., -30., 30., -10., 10.]
-    call system_clock(t1,trate,tmax)
-    query = box_search(root, box)
-    call system_clock(t2,trate,tmax)
-    WRITE(*,*) "Time taken for box search:", float(t2 - t1)/1e3, "seconds"
-    indices = query%idx
-    count = size(indices)
 
-    ! Brute-force
-    allocate(indices_BF(n))
-    count2 = 0
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! BOX-SEARCH TEST
+    nquery = 1000
+    box = [-20., 10., -5., 20., -10., 10.]
     call system_clock(t1,trate,tmax)
-    do i=1,n
-      if (x(i) >= box(1) .and. x(i) <= box(2) .and. &
-          y(i) >= box(3) .and. y(i) <= box(4) .and. &
-          z(i) >= box(5) .and. z(i) <= box(6)) then
-        count2 = count2 + 1
-        indices_BF(count2) = i
-      end if
+    do i = 1, nquery
+      query = box_search(root, box)
     end do
     call system_clock(t2,trate,tmax)
-    WRITE(*,*) "Time taken for brute-force search:", float(t2 - t1)/1e3, "seconds"
+    WRITE(*,*) "Time taken to find box points:", float(t2 - t1)/float(trate)/float(nquery), "seconds"
 
-    write(*,*) "Number of points in box:", count
-    ! write(*,*) "Indices of points in box (KD-Tree):"
-    ! write(*,*) indices(1:count)
-    write(*,*) "Number of points in box (brute-force):", count2
-    ! write(*,*) "Indices of points in box (brute-force):"
-    ! write(*,*) indices_BF(1:count2)
+    allocate(indices(k))
+    indices = query%idx
+    write(*,*) "Number of points inside the box:", size(indices)
+
+    !Brute force test
+    ninside = 0
+    call system_clock(t1,trate,tmax)
+    do i = 1, n
+        if (x(i) >= box(1) .and. x(i) <= box(2) .and. &
+            y(i) >= box(3) .and. y(i) <= box(4) .and. &
+            z(i) >= box(5) .and. z(i) <= box(6)) then
+            ninside = ninside + 1
+        end if
+    end do
+    call system_clock(t2,trate,tmax)
+    WRITE(*,*) "Time taken to find box points (BF):", float(t2 - t1)/float(trate), "seconds"
+    print *, "Number of points inside the box (BF):", ninside
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 
     ! Deallocate memory
-    deallocate(indices, indices_BF)
-    deallocate(x, y, z)
+    deallocate(x, y, z, points)
     deallocate(root)
 
 end program main
