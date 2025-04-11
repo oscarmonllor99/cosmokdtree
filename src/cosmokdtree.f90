@@ -41,7 +41,7 @@
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! Pending improvements:
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-! - Better parallelism for tree building (if possible)
+! - Better parallelism (scaling) for tree building (if possible)
 !
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -54,9 +54,13 @@ module cosmokdtree
                box_search
 
     !+++++++++++++++++++++++++++++++
-    !++++ Dimensionality
-    !+++++++++++++++++++++++++++++++              
-    integer, parameter :: ndim = 3 ! Number of dimensions (2D, 3D, ...)
+    !++++ Dimensionality (default 3D)
+    !+++++++++++++++++++++++++++++++   
+#if defined(dimen)
+    integer, parameter :: ndim = dimen
+#else 
+    integer, parameter :: ndim = 3
+#endif
 
     !+++++++++++++++++++++++++++++++
     !++++ Precision and integer kind
@@ -71,6 +75,13 @@ module cosmokdtree
     integer, parameter :: intkind = 8
 #else
     integer, parameter :: intkind = 4
+#endif
+
+    !+++++++++++++++++++++++++++++++
+    !++++ Periodic boundary conditions
+    !+++++++++++++++++++++++++++++++
+#if periodic == 1
+    real(kind=prec) :: L(ndim) ! Will be initialized in build_kdtree
 #endif
 
     !+++++++++++++++++++++++++++++++
@@ -95,11 +106,6 @@ module cosmokdtree
     end type KDTreeResult
     !+++++++++++++++++++++++++++++++
 
-#if periodic == 1
-    ! Box size (periodic boundary conditions), global variable
-    real(kind=prec) :: L(ndim) ! Will be initialized in build_kdtree
-#endif
-
 contains
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -118,23 +124,34 @@ contains
 #if periodic == 1
         real(kind=prec), intent(in) :: L_in(:)
         integer :: flag_stop
+        integer :: j
 #endif
         !local
         real(kind=prec), allocatable :: points(:, :)
         integer(kind=intkind), allocatable :: indices(:)
         integer(kind=intkind) :: n, i
         integer :: depth, max_depth, nproc, leafsize
-        integer :: j
+        
         !out
         type(KDTreeNode), pointer :: tree
     
         ! Enable nested parallelism
         call omp_set_nested(.true.) 
     
+        ! Check dimensionality of input
+        if (size(points_in, 2) /= ndim) then
+            STOP 'Input points must have the same dimensionality as the tree!'
+        end if
+
         ! Number of points
         n = size(points_in, 1, kind=intkind)
 
-# if periodic == 1
+#if periodic == 1
+        ! Check dimensionality of input
+        if (size(L_in, 1) /= ndim) then
+            STOP 'Input L must have the same dimensionality as the tree!'
+        end if
+
         ! Set the box size (global variable of the module)
         L = Lin
     
@@ -152,7 +169,7 @@ contains
         !$OMP END PARALLEL
 
         if (flag_stop .gt. 0) STOP 'Points outside (-L/2, L/2) range !!'
-# endif
+#endif
 
         ! Initialize global indices and points
         allocate(points(n, ndim))
@@ -927,7 +944,7 @@ contains
 
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    ! Euclidean distance between two 3D points
+    ! Euclidean distance between two points (Minkowski p=2)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     function distance(p1, p2) result(dist)
         implicit none
