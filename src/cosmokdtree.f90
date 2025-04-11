@@ -130,11 +130,11 @@ contains
         real(kind=prec), allocatable :: points(:, :)
         integer(kind=intkind), allocatable :: indices(:)
         integer(kind=intkind) :: n, i
-        integer :: depth, max_depth, nproc, leafsize
+        integer :: depth, max_depth, nproc, leafsize, ndim_par
         
         !out
         type(KDTreeNode), pointer :: tree
-    
+        
         ! Enable nested parallelism
         call omp_set_nested(.true.) 
     
@@ -151,23 +151,24 @@ contains
         if (size(L_in, 1) /= ndim) then
             STOP 'Input L must have the same dimensionality as the tree!'
         end if
-
+        
         ! Set the box size (global variable of the module)
-        L = Lin
-    
+        L = L_in
+
         ! Check all points are within (-L/2, L/2)
         flag_stop = 0
-        !$OMP PARALLEL SHARED(points,n,L,ndim), &
+        ndim_par = ndim
+        !$OMP PARALLEL SHARED(points,n,L,ndim_par), &
         !$OMP PRIVATE(i,j)
         !$OMP DO REDUCTION(+:flag_stop)
-        do j=1,ndim
+        do j=1,ndim_par
             do i=1,n
-                if (points(i,j) .lt. -L(j)/2 .or. points(i,j) .gt. L(j)/2) flag_stop = 1
+                if (points_in(i,j) .lt. -L(j)/2 .or. points_in(i,j) .gt. L(j)/2) flag_stop = 1
             enddo
         enddo
         !$OMP ENDDO
         !$OMP END PARALLEL
-
+        
         if (flag_stop .gt. 0) STOP 'Points outside (-L/2, L/2) range !!'
 #endif
 
@@ -960,7 +961,7 @@ contains
 
 #if periodic == 1
         do i=1,ndim
-            dx(i) = min(abs(dx(i)), L(i) - abs(d(i)))
+            dx(i) = min(abs(dx(i)), L(i) - abs(dx(i)))
         end do
 #endif
 
