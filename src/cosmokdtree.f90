@@ -124,20 +124,20 @@ contains
 #if periodic == 1
         real(kind=prec), intent(in) :: L_in(:)
         integer :: flag_stop
-        integer :: j
+        integer :: j, ndim_par
 #endif
         !local
         real(kind=prec), allocatable :: points(:, :)
         integer(kind=intkind), allocatable :: indices(:)
         integer(kind=intkind) :: n, i
-        integer :: depth, max_depth, nproc, leafsize, ndim_par
+        integer :: depth, max_depth, nproc, leafsize
         
         !out
         type(KDTreeNode), pointer :: tree
-        
+
         ! Enable nested parallelism
         call omp_set_nested(.true.) 
-    
+
         ! Check dimensionality of input
         if (size(points_in, 2) /= ndim) then
             STOP 'Input points must have the same dimensionality as the tree!'
@@ -191,7 +191,7 @@ contains
         max_depth = compute_max_depth(omp_get_max_threads())
         
         ! Leafsize scaling with the number of points
-        leafsize = int(real(n)**0.333 / 4.)
+        leafsize = int(2./7. * real(n)**(0.3333))
         leafsize = max(leafsize, 1)
 
         tree => build_kdtree_recursive(points, indices, depth, max_depth, leafsize)
@@ -572,8 +572,12 @@ contains
                     right = 2 * i + 1
                     largest = i
             
-                    if (left <= k .and. dist(left) > dist(largest)) largest = left
-                    if (right <= k .and. dist(right) > dist(largest)) largest = right
+                    if (left <= k) then
+                        if (dist(left) > dist(largest)) largest = left
+                    end if
+                    if (right <= k) then
+                        if (dist(right) > dist(largest)) largest = right
+                    end if
             
                     if (largest /= i) then
                         ! Swap i-th element with largest
