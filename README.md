@@ -16,7 +16,7 @@ Developed at the Departament d'Astronomia i Astrofísica of Universitat de Valè
 
 ## Brief description
 
-Fortran 2003/2008 $k$-d tree implementation with OpenMP directives for parallel tree construction. Designed for efficient spatial indexing and nearest-neighbour searches in large simulation datasets. A Below, we provide a brief description of the different techniques building the method:
+Fortran 2003/2008 $k$-d tree implementation with OpenMP directives for parallel tree construction. Designed for efficient spatial indexing and nearest-neighbour searches in large simulation datasets. Below, we provide a brief description of the different techniques used to build the method:
 
 * The maximum variance splitting is used to choose the axis across which the input dataset is split at each tree depth.
 * *Quickselect* is employed to find the median point dividing the data into two parts across the splitting axis. A *lazy* approach is followed, as the algorithm is not required to find the exact median point, but a close candidate inside the (45%, 55%) range.
@@ -63,10 +63,14 @@ We already provide the user with an example Makefile to compile the code inside 
 make PERIODIC=A DIMEN=B LONGINT=C DOUBLEPRECISION=D
 ```
 
-`PERIODIC` tells the code whether to use periodic boundary conditions or not (`0` deactivates them, while `1` will switch them on). Defaults to '0'.
-`DIMEN` sets the dimensionality of the points provided as input. Hence `DIMEN` should be an integer equal to or greater than 1. Defaults to '3'.
-`LONGINT` specifies the size of integers employed to index points in the $k$-d tree. If more than $N = 2,147,483,648$ are used, `LONGINT=1` is necessary. Defaults to '0'.
-`DOUBLEPRECISION` sets the floating point arithmetic precision to `REAL*4` if it is `0`, or to `REAL*8' if `1`. If high precision is needed, it should be activated. Defaults to '0'.
+`PERIODIC` tells the code whether to use periodic boundary conditions or not (`0` deactivates them, while `1` will switch them on). Defaults to `0`.
+
+`DIMEN` sets the dimensionality of the points provided as input. Hence `DIMEN` should be an integer equal to or greater than `1`. Defaults to `3`.
+
+`LONGINT` specifies the size of integers employed to index points in the $k$-d tree. If more than $N = 2,147,483,648$ are used, `LONGINT=1` is necessary. Defaults to `0`.
+
+`DOUBLEPRECISION` sets the floating point arithmetic precision to `REAL*4` if it is `0`, or to `REAL*8` if `1`. If high precision is needed, it should be activated. Defaults to `0`.
+
 
 ## Running the code inside Fortran
 
@@ -96,7 +100,7 @@ indices = query%idx
 distances = query%dist
 ```
 
-Several query functions are available: 'knn_search', 'ball_search' and 'box_search'. The first finds the $k$-nearest neighbours from a point, the second finds all neighbours within a $R$ distance from a point and, the last one finds all points inside a query box. In the first two cases, we provide the option (`sorted = .true.`) to sort results by ascending distance to the query point. In all cases, if `PERIODIC=1`, periodic boundary conditions will be taken into account.
+Several query functions are available: `knn_search`, `ball_search` and `box_search`. The first finds the $k$-nearest neighbours from a point, the second finds all neighbours within a $R$ distance from a point and, the last one finds all points inside a query box. In the first two cases, we provide the option (`sorted = .true.`) to sort results by ascending distance to the query point. In all cases, if `PERIODIC=1`, periodic boundary conditions will be taken into account.
 
 
 
