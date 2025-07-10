@@ -12,7 +12,7 @@ DOUBLEPRECISION := $(if $(DOUBLEPRECISION),$(DOUBLEPRECISION),0)
 $(info DOUBLEPRECISION = $(DOUBLEPRECISION))
 
 DIMEN := $(if $(DIMEN),$(DIMEN),3)
-$(info NDIM = $(DIMEN))
+$(info DIMEN = $(DIMEN))
 
 # Compiler and flags
 FC = gfortran

@@ -273,7 +273,7 @@ contains
 
     ! Subtree construction (parallel at the top levels)
     if (depth < max_depth) then
-    !$OMP PARALLEL
+    !$OMP PARALLEL NUM_THREADS(2)
     !$OMP SINGLE
 
     !$OMP TASK
