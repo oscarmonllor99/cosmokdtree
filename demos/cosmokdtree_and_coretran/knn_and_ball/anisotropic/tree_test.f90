@@ -12,26 +12,38 @@ program main
 
     implicit none
 
+    !parameters
+    integer :: ncpu
+    integer :: j, i
     integer, parameter :: prec = 4 
     integer, parameter :: intkind = 4
 
     !input data
+    real(kind=prec), allocatable :: L(:)
     real(kind=prec), allocatable :: x(:), y(:), z(:)
     real(kind=prec), allocatable :: points(:,:)
     integer(kind=intkind) :: n
-
+    
+    !tree results
     type(KDTreeNode), pointer :: root
     type(KDTreeResult) :: query
+    integer(kind=intkind), allocatable :: indices(:)
+    real(kind=prec), allocatable :: dist(:)
+
+    !time
+    integer*8 :: t1, t2, trate, tmax
+
+    !queries
+    real(kind=prec), allocatable :: ttarget(:,:)
+    real(kind=prec) :: ball_radius
+    integer :: k, nquery, ninside
+
     !file bigger than 2GB
-    integer :: npart_save, i
+    integer :: npart_save
     integer :: nsaves, nchecker
     character(len=1) :: ifile
     !!!!!!!!!!!!!!!!!!!!!!!!
-    integer :: ncpu
-    integer*8 :: t1, t2, trate, tmax
-    integer :: k, nqueries
-    real(kind=prec) :: targett(3)
-    real*4 :: rad
+
     !coretran
     TYPE(KDTREE) :: tree_coretran
     REAL(R64), ALLOCATABLE :: x_coretran(:), y_coretran(:), z_coretran(:)
@@ -81,8 +93,8 @@ program main
     read(10) z
     close(10)
     call system_clock(t2,trate,tmax)
-    WRITE(*,*) "Time taken to read points:", float(t2 - t1)/float(trate), "seconds"
-    WRITE(*,*) "Number of points:", n
+    ! WRITE(*,*) "Time taken to read points:", float(t2 - t1)/float(trate), "seconds"
+    ! WRITE(*,*) "Number of points:", n
 
     allocate(points(n,3))
     points(:,1) = x
@@ -95,7 +107,7 @@ program main
     call system_clock(t2,trate,tmax)
     WRITE(*,*) "Time taken to build KD-Tree:", float(t2 - t1)/float(trate), "seconds"
 
-    !   ! Build the KD-Tree coretran
+    ! ! Build the KD-Tree coretran
     ! x_coretran = x
     ! y_coretran = y
     ! z_coretran = z
@@ -104,48 +116,54 @@ program main
     ! call system_clock(t2,trate,tmax)
     ! WRITE(*,*) "CORETRAN Time taken to build KD-Tree:", float(t2 - t1)/float(trate), "seconds"
 
-    ! knn-search 
-    targett = [50.,50.,50.]
-    k = 1000000
-    nqueries = 10
+    ! QUERIES
+    allocate(L(3))
+    L = 100.
+    nquery = 1000
+    allocate(ttarget(nquery,3))
+    do j = 1, 3 
+      do i = 1, nquery
+        ttarget(i,j) = rand() * L(j)  ! Random target point
+      end do
+    end do
 
+    ! knn-search 
+    k = 1
     call system_clock(t1,trate,tmax)
-    do i = 1, nqueries
-      query = knn_search(root,targett,k)
+    do i = 1, nquery
+      query = knn_search(root, ttarget(i,:), k)
     end do
     call system_clock(t2,trate,tmax)
-    write(*,*) "Time taken for knn_search:", float(t2 - t1)/float(trate)/nqueries, "seconds"
+    WRITE(*,*) "Time taken to find nearests neighbors:", float(t2 - t1)/float(trate)/float(nquery), "seconds"
 
     ! !CORETRAN KNN TEST
     ! call system_clock(t1,trate,tmax)
-    ! do i = 1, nqueries
+    ! do i = 1, nquery
     !   DA = SEARCH%KNEAREST(tree_coretran, x_coretran, y_coretran, z_coretran, &
-    !           XQUERY=DBLE(targett(1)), YQUERY=DBLE(targett(2)),  &
-    !           ZQUERY=DBLE(targett(3)), K=k)
+    !           XQUERY=DBLE(ttarget(i,1)), YQUERY=DBLE(ttarget(i,2)),  &
+    !           ZQUERY=DBLE(ttarget(i,3)), K=k)
     ! end do
     ! call system_clock(t2,trate,tmax)
-    ! WRITE(*,*) "CORETRAN Time taken to find nearests neighbors:", float(t2 - t1)/float(trate)/float(nqueries), "seconds"
+    ! WRITE(*,*) "CORETRAN Time taken to find nearests neighbors:", float(t2 - t1)/float(trate)/float(nquery), "seconds"
 
     ! ! ball-search
-    ! rad = 30.
-    ! targett = [50.,50.,50.]
-    ! nqueries = 1
+    ! ball_radius = 0.01
     ! call system_clock(t1,trate,tmax)
-    ! do i = 1, nqueries
-    !   query = ball_search(root,targett,rad)
+    ! do i = 1, nquery
+    !   query = ball_search(root, ttarget, ball_radius)
     ! end do
     ! call system_clock(t2,trate,tmax)
-    ! write(*,*) "Time taken for ball_search:", float(t2 - t1)/float(trate)/nqueries, "seconds"
+    ! WRITE(*,*) "Time taken to find points in ball:", float(t2 - t1)/float(trate)/float(nquery), "seconds"
     
     ! !CORETRAN BALL TEST
     ! call system_clock(t1,trate,tmax)
-    ! do i=1,nqueries
+    ! do i=1, nquery
     !   DA = SEARCH%KNEAREST(tree_coretran, x_coretran, y_coretran, z_coretran, &
-    !             XQUERY=DBLE(targett(1)), YQUERY=DBLE(targett(2)),  &
-    !             ZQUERY=DBLE(targett(3)), RADIUS=DBLE(rad))  
+    !             XQUERY=DBLE(ttarget(i,1)), YQUERY=DBLE(ttarget(i,2)),  &
+    !             ZQUERY=DBLE(ttarget(i,3)), RADIUS=DBLE(ball_radius))  
     ! end do
     ! call system_clock(t2,trate,tmax)
-    ! WRITE(*,*) "CORETRAN Time taken to find points within the ball:", float(t2 - t1)/float(trate)/float(nqueries), "seconds"
+    ! WRITE(*,*) "CORETRAN Time taken to find points within the ball:", float(t2 - t1)/float(trate)/float(nquery), "seconds"
 
     ! Deallocate memory
     deallocate(x, y, z)
