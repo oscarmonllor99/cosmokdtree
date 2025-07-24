@@ -92,10 +92,11 @@ module cosmokdtree
         real(kind=prec) :: point(ndim) ! k-D point (x, y, z, ...)
         integer(kind=intkind) :: index       ! Index of the point within the original array
         integer :: axis ! Splitting axis (1 for x, 2 for y, 3 for z, 4 for w, ...)
+        real(kind=prec) :: bounds(2*ndim)
         type(KDTreeNode), pointer :: left => null()  ! Left child
         type(KDTreeNode), pointer :: right => null() ! Right child
         !leaf, for faster search and building
-        integer :: is_leaf     ! Flag to indicate if the node is a leaf
+        logical :: is_leaf  ! Flag to indicate if the node is a leaf
         real(kind=prec), pointer :: leaf_points(:, :) => null()  ! Points in the leaf (for leaf nodes)
         integer(kind=intkind), pointer :: leaf_indices(:) => null()  ! Indices of points in the leaf
     end type KDTreeNode
@@ -112,15 +113,16 @@ contains
     ! Initialize kd-tree construction
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #if periodic == 1
-    function build_kdtree(points_in, L_in) result(tree)
+    function build_kdtree(points_in, L_in, leaf) result(tree)
 #else
-    function build_kdtree(points_in) result(tree)
+    function build_kdtree(points_in, leaf) result(tree)
 #endif
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         use omp_lib
         implicit none
         !in
         real(kind=prec), intent(in) :: points_in(:, :)
+        integer, intent(in), optional :: leaf 
 #if periodic == 1
         real(kind=prec), intent(in) :: L_in(:)
         integer :: flag_stop
@@ -189,12 +191,22 @@ contains
 
         ! Build KD-tree
         max_depth = compute_max_depth(omp_get_max_threads())
-        
-        ! Leafsize scaling with the number of points
-        leafsize = int(2./7. * real(n)**(0.3333))
-        leafsize = max(leafsize, 1)
 
+        ! Leafsize
+        if ( present(leaf) ) then 
+            leafsize = leaf
+        else
+            leafsize = 16
+        endif
+
+        !root node and children are created recursively
         tree => build_kdtree_recursive(points, indices, depth, max_depth, leafsize)
+
+        !root node has point bounds
+        do i = 1, ndim
+            tree%bounds(2*i-1) = minval(points(:,i))
+            tree%bounds(2*i) = maxval(points(:,i))
+        end do
 
         deallocate(points, indices)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -226,6 +238,7 @@ contains
     integer, intent(in) :: max_depth ! max_depth to allow parallelism
     integer, intent(in) :: leafsize ! size of leaf nodes
     !local
+    integer(kind=intkind) :: size_points ! Number of points in the current node
     integer :: axis, j !axis to split points
     real(kind=prec) :: var(ndim) ! variance of the points in each axis
     type(KDTreeNode), pointer :: node   ! New node to be created
@@ -233,43 +246,44 @@ contains
     integer(kind=intkind) :: median, median_approx ! half size of data
     integer(kind=intkind) :: kth_index ! index of the median point
 
-    if (size(points, 1) == 0) then
+    allocate(node)
+
+    size_points = size(points, 1)
+
+    if (size_points == 0) then
         node => null()
         return
     end if
 
-    ! Find the axis with the maximum variance
-    do j=1,ndim
-        var(j) = variance(points, j) ! variance in x, y, z, ...
-    enddo
-    axis = maxloc(var, dim=1) ! Find the axis with maximum variance
-
-    ! Find median and partition points
-    median = size(points, 1, kind=intkind) / 2 + 1
-    call quickselect(points, indices, median, axis, kth_point, kth_index, median_approx)
-
-    ! Allocate node
-    allocate(node)
-    node%point = kth_point
-    node%index = kth_index
-    node%axis = axis
-
     ! Check if this is a leaf node
-    if (size(points, 1, kind=intkind) <= leafsize) then
-        node%is_leaf = 1
+    if (size_points <= leafsize) then
+        node%is_leaf = .true.
         ! Store all points and indices in the leaf node
-        allocate(node%leaf_points(size(points, 1, kind=intkind), ndim))
-        allocate(node%leaf_indices(size(points, 1, kind=intkind)))
+        allocate(node%leaf_points(size_points, ndim))
+        allocate(node%leaf_indices(size_points))
         node%leaf_points = points
         node%leaf_indices = indices
         node%left => null()
         node%right => null()
         return
     else
-        node%is_leaf = 0
-        node%point = kth_point
-        node%index = kth_index
+        node%is_leaf = .false.
     end if
+
+    ! Maximum-variance splitting axis
+    do j=1,ndim
+        var(j) = variance(points, j)
+    enddo
+    axis = maxloc(var, dim=1) 
+
+    ! Find median and partition points
+    median = size_points / 2 + 1
+    call quickselect(points, indices, median, axis, kth_point, kth_index, median_approx)
+
+    ! Allocate node
+    node%point = kth_point
+    node%index = kth_index
+    node%axis = axis
 
     ! Subtree construction (parallel at the top levels)
     if (depth < max_depth) then
@@ -290,6 +304,8 @@ contains
     node%left => build_kdtree_recursive(points(1:median_approx-1,:),indices(1:median_approx-1),depth+1,max_depth,leafsize)
     node%right => build_kdtree_recursive(points(median_approx+1:,:),indices(median_approx+1:),depth+1,max_depth,leafsize)
     end if
+
+    return
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     end function build_kdtree_recursive
@@ -461,7 +477,6 @@ contains
     endfunction knn_search
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     recursive subroutine knn_search_recursive(node, depth, targett, dist, idx, k)
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -476,7 +491,6 @@ contains
         integer(kind=intkind), intent(inout) :: idx(k) 
         integer :: i ! Index running over leaf points
         real(kind=prec):: dist_current, dist_furthest, d1d
-        real(kind=prec):: epsilon = 1.e-6 
         integer :: axis
         logical :: look_opposite
         ! Temporary point for contiguous memory access
@@ -485,19 +499,19 @@ contains
         if (.not. associated(node)) return
 
         ! First, check if it is a leaf node
-        if (node%is_leaf == 1) then
-            
+        if (node%is_leaf .eqv. .true.) then
+
+            dist_furthest = dist(1)
             ! Check all points in the leaf with brute force
             do i = 1, size(node%leaf_indices)
                 temp_point = node%leaf_points(i, :)
                 dist_current = distance(temp_point, targett)
-                dist_furthest = dist(1)
-
                 ! If the current point is closer than the furthest, replace it
-                if (dist_current < dist_furthest + epsilon) then
+                if (dist_current < dist_furthest) then
                     dist(1) = dist_current
                     idx(1) = node%leaf_indices(i)
                     call max_heap_insert(dist, idx, k)
+                    dist_furthest = dist(1)
                 end if
             end do
 
@@ -508,10 +522,11 @@ contains
             dist_furthest = dist(1)
 
             ! Update best points and indices if the current node is closer than the furthest
-            if (dist_current < dist_furthest + epsilon) then
+            if (dist_current < dist_furthest) then
                 dist(1) = dist_current
                 idx(1) = node%index
                 call max_heap_insert(dist, idx, k)
+                dist_furthest = dist(1)
             end if
 
             axis = node%axis
@@ -699,7 +714,7 @@ contains
         end if
 
         ! First, check if it is a leaf node
-        if (node%is_leaf == 1) then
+        if (node%is_leaf .eqv. .true.) then
             
             ! Check all points in the leaf with brute force
             do i = 1, size(node%leaf_indices)
@@ -829,7 +844,7 @@ contains
         end if
 
         ! First, check if it is a leaf node
-        if (node%is_leaf == 1) then
+        if (node%is_leaf .eqv. .true.) then
             
             ! Check all points in the leaf with brute force
             do i = 1, size(node%leaf_indices)
