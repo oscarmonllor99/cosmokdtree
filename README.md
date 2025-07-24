@@ -1,4 +1,4 @@
-# cosmokdtree
+# RAPID-kdtree
 
 ## About
 
