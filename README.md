@@ -74,7 +74,7 @@ make PERIODIC=A DIMEN=B LONGINT=C DOUBLEPRECISION=D
 
 ## Running the code inside Fortran
 
-As *cosmokdtree* builds the $k$-d tree and saves query results using `pointers` and `derived types` (KDTreeNode and KDTreeResult), its usage is quite intuitive and straightforward. Inside the `demos` folders we provided many examples displaying the wide range of possibilities in which the $k$-d tree could be applied, depending on the compilation options. The tree must be declared using the following directive:
+As *rapid-kdtree* builds the $k$-d tree and saves query results using `pointers` and `derived types` (KDTreeNode and KDTreeResult), its usage is quite intuitive and straightforward. Inside the `demos` folders we provided many examples displaying the wide range of possibilities in which the $k$-d tree could be applied, depending on the compilation options. The tree must be declared using the following directive:
 
 ```
 type(KDTreeNode), pointer :: tree
