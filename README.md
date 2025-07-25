@@ -16,11 +16,11 @@ Developed at the Departament d'Astronomia i Astrofísica of Universitat de Valè
 
 ## Brief description
 
-Fortran 2003/2008 $k$-d tree implementation with OpenMP directives for parallel tree construction. Designed for efficient spatial indexing and nearest-neighbour searches in large simulation datasets. Below, we provide a brief description of the different techniques used to build the method:
+Fortran 2003/2008 $k$-d tree implementation with OpenMP directives for parallel tree construction. Designed for efficient spatial indexing and nearest-neighbour searches of large datasets. Below, we provide a brief description of the different techniques used to build the method:
 
 * The maximum variance splitting is used to choose the axis across which the input dataset is split at each tree depth.
 * *Quickselect* is employed to find the median point dividing the data into two parts across the splitting axis. A *lazy* approach is followed, as the algorithm is not required to find the exact median point, but a close candidate inside the (45%, 55%) range.
-* An adaptive leaf size is used, scaling with the number of input points. Faster tree construction and queries are obtained with this technique.
+* A configurable leaf size is used, defaulting to $N_\text{leaf} = 16$.
 * Tree construction is parallelised leveraging *OpenMP task* constructs, until a maximum tree depth ($d_\text{max}$) is reached and all physical cores ($N_\text{CPU}$) are being used.
 * The *Max Heap* structure is utilised to efficiently save and update the $k$-nearest neighbours, as the tree is traversed.
 * In case of needing sorted results, a *Quicksort* implementation is leveraged.
