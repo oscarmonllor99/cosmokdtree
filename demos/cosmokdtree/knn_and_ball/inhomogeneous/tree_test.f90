@@ -43,6 +43,7 @@ program main
     L = [100., 100., 100.]
 
     ! Read input data
+    call system_clock(t1,trate,tmax)
     open(unit=10, file='/home/monllor/projects/gcc_kdtree/cosmokdtree-dev/benchmark/examples/points_7.dat', &
         form = 'unformatted')
     read(10) n
