@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PATH_KDTREE="../../../../src/bin"
+PATH_KDTREE="../../../../../src/bin"
 LIBS="-Wl,-rpath,$HOME/coretran/lib $HOME/coretran/lib/libcoretran.so"
 INC="-I$HOME/coretran/library/include/coretran/"
 
