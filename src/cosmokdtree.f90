@@ -418,7 +418,7 @@ contains
         real(kind=prec), intent(inout) :: points(:, :)  ! 2D array of points
         integer(kind=intkind), intent(inout) :: indices(:) ! 1D array of indices
         integer, intent(in) :: axis
-        integer, intent(in) :: size_points ! Size of the data to be partitioned
+        integer(kind=intkind), intent(in) :: size_points ! Size of the data to be partitioned
         integer(kind=intkind) :: i, j
         real(kind=prec):: pivot_value
         integer(kind=intkind) :: n_left
