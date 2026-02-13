@@ -112,7 +112,6 @@ module cosmokdtree
     type :: node_queue
         type(KDTreeNode), pointer :: node 
     end type node_queue
-
     !+++++++++++++++++++++++++++++++
 
 contains
@@ -289,7 +288,7 @@ contains
     real(kind=prec) :: maxside, minx, maxx
     real(kind=prec) :: bounds_left(ndim*2), bounds_right(ndim*2)
     real(kind=prec) :: minvals(ndim), maxvals(ndim), spreads(ndim), side(ndim)
-    real :: midpoint
+    real(kind=prec) :: midpoint
     integer :: axis, j !axis to split points
     integer(kind=intkind) :: i, size_points, n_left ! Size of the data to be split
     type(KDTreeNode), pointer :: node   ! New node to be created
