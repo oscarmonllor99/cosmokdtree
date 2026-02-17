@@ -53,7 +53,7 @@ module cosmokdtree
     private  
     public :: build_kdtree, deallocate_kdtree, & 
               knn_search, ball_search, box_search, &
-              KDTreeNode, KDTreeResult
+              KDTreeNode, KDTreeResult, flag_periodic
 
     !+++++++++++++++++++++++++++++++
     !++++ Dimensionality (default 3D)
@@ -84,6 +84,9 @@ module cosmokdtree
     !+++++++++++++++++++++++++++++++
 #if periodic == 1
     real(kind=prec) :: L(ndim) ! Will be initialized in build_kdtree
+    logical :: flag_periodic = .true.
+#else
+    logical :: flag_periodic = .false.
 #endif
 
     !+++++++++++++++++++++++++++++++
@@ -1237,7 +1240,7 @@ contains
             d1d = targett(axis) - node%point(axis)
             ! Recursively search the subtree that contains the target
             if (d1d < 0) then
-                call ball_search_recursive(node%left, targett, dist, idx, radius, count)
+                call ball_search_recursive_hyperp(node%left, targett, dist, idx, radius, count)
                 ! Check if we need to search the other subtree
                 look_opposite = .false.
                 if (abs(d1d) <= radius) look_opposite = .true.
@@ -1245,17 +1248,17 @@ contains
                 if (targett(axis) - radius <= -L(axis) / 2. ) look_opposite = .true.
 #endif
                 if (look_opposite .eqv. .true.) then
-                    call ball_search_recursive(node%right, targett, dist, idx, radius, count)
+                    call ball_search_recursive_hyperp(node%right, targett, dist, idx, radius, count)
                 end if
             else
-                call ball_search_recursive(node%right, targett, dist, idx, radius, count)
+                call ball_search_recursive_hyperp(node%right, targett, dist, idx, radius, count)
                 look_opposite = .false.
                 if (abs(d1d) <= radius) look_opposite = .true.
 #if periodic == 1
                 if (targett(axis) + radius >= L(axis) / 2. ) look_opposite = .true.
 #endif
                 if (look_opposite .eqv. .true.) then
-                    call ball_search_recursive(node%left, targett, dist, idx, radius, count)
+                    call ball_search_recursive_hyperp(node%left, targett, dist, idx, radius, count)
                 end if
             end if
 
