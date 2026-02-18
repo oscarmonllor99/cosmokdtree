@@ -26,8 +26,8 @@ endif
 
 # Fortran flags
 FC = gfortran
-FFLAGS = -cpp -O0 -g -mcmodel=medium -fopenmp -march=native -fcheck=all -fbounds-check -fbacktrace -ffpe-trap=invalid,zero,overflow
-#FFLAGS = -cpp -O3 -g -fopenmp -mieee-fp -ftree-vectorize -funroll-loops -march=native -mcmodel=medium
+## FFLAGS = -cpp -O0 -g -mcmodel=medium -fopenmp -march=native -fcheck=all -fbounds-check -fbacktrace -ffpe-trap=invalid,zero,overflow
+FFLAGS = -cpp -O3 -g -fopenmp -mieee-fp -ftree-vectorize -funroll-loops -march=native -mcmodel=medium
 FFLAGS += -Dperiodic=$(PERIODIC) -Dlongint=$(LONGINT) -Ddoubleprecision=$(DOUBLEPRECISION) -Ddimen=$(DIMEN) 
 
 #sources and .o .mod
