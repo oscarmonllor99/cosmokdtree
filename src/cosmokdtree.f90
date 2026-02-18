@@ -53,7 +53,7 @@ module cosmokdtree
     private  
     public :: build_kdtree, deallocate_kdtree, & 
               knn_search, ball_search, box_search, &
-              KDTreeNode, KDTreeResult, flag_periodic
+              KDTreeNode, KDTreeResult
 
     !+++++++++++++++++++++++++++++++
     !++++ Dimensionality (default 3D)
@@ -84,9 +84,6 @@ module cosmokdtree
     !+++++++++++++++++++++++++++++++
 #if periodic == 1
     real(kind=prec) :: L(ndim) ! Will be initialized in build_kdtree
-    logical :: flag_periodic = .true.
-#else
-    logical :: flag_periodic = .false.
 #endif
 
     !+++++++++++++++++++++++++++++++

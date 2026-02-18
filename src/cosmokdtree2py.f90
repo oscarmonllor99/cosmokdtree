@@ -44,6 +44,7 @@ contains
         !f2py intent(in) :: points, leaf, boxsize
 
         !check boxsize and periodicity
+#if periodic == 1
         periodic_in = .false.
         do i = 1, size(boxsize)
             if ( boxsize(i) /= -1. ) then
@@ -52,10 +53,10 @@ contains
             endif
         enddo
 
-        if ( (periodic_in .eqv. .false.) &
-            .and. (flag_periodic .eqv. .true.)) then
+        if ( periodic_in .eqv. .false. ) then
             STOP "Error: provide boxsize, periodic boundary conditions are enabled."
         endif
+#endif
 
         !building function
 #if periodic == 1
