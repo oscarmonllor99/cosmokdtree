@@ -58,7 +58,7 @@ $(MOD_OBJ): $(MOD_SRC) | $(BINDIR)
 # Compile the Python wrapper using f2py
 python: $(MOD_OBJ) $(PYMOD_SRC)
 	$(info Building Python module $(PYMOD_NAME) ...)
-	f2py --f90flags='$(FFLAGS) -I$(BINDIR)' -c -m $(PYMOD_NAME) $(MOD_OBJ) $(PYMOD_SRC)
+	f2py --f90flags='$(FFLAGS) -I$(PWD)/$(BINDIR)' -c -m $(PYMOD_NAME) $(MOD_OBJ) $(PYMOD_SRC)
 
 # Ensure bin/ exists
 $(BINDIR):
