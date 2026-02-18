@@ -148,8 +148,14 @@ contains
         !out
         type(KDTreeNode), pointer :: tree
 
-        ! Enable nested parallelism
-        call omp_set_nested(.true.) 
+        !!!! nested parallelism!!!!!!!
+        !-- deprecated
+        ! call omp_set_nested(.true.) 
+        !-- new -> nested parallelism limit (30-40 are already extremely high values)
+        !     for security, we set it to 50. For a leaf of 16 would mean npart=10^16 
+        !     far beyond the actual manageable limit of 10^10-10^11 points.
+        call omp_set_max_active_levels(50)
+        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
         ! Check dimensionality of input
         if (size(points_in, 2) /= ndim) then
