@@ -1331,7 +1331,7 @@ contains
         integer(kind=intkind), allocatable, intent(inout) :: idx(:)  ! Index of the points within the box
         integer, intent(inout) :: count_idx ! Counters for the number of elements in idx 
         !local
-        real(kind=prec) :: split_value(3)
+        real(kind=prec) :: split_value(ndim)
         integer :: i
         logical :: in_box ! tells if a point is inside the query box
         integer :: axis
