@@ -129,6 +129,7 @@ program main
       means(irad) = mean
       stds(irad) = std
     enddo
+    
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     open(unit=11, file='../../../../benchmark/inhomo_cosmokdtree_ball_times.txt', status='replace')
     write(11,*) 'Ball_radius  Mean_time(s)  Std_dev(s)'

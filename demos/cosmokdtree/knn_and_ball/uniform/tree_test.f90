@@ -8,7 +8,7 @@ program main
     !parameters
     integer :: ncpu
     integer :: ndim, j
-    integer, parameter :: prec = 4 
+    integer, parameter :: prec = 4
     integer, parameter :: intkind = 4
 
     !input data
@@ -139,7 +139,7 @@ program main
       write(10,*) karray(ik), means(ik), stds(ik)
     end do
     close(10)
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

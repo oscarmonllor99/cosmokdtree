@@ -1,6 +1,4 @@
 program main
-    use cosmokdtree
-    use omp_lib
 !-------------------------------------------------------
 !*     From coretran ****************************************
     use variableKind, only: r64
@@ -12,31 +10,18 @@ program main
 
     implicit none
 
-    !parameters
-    integer :: ncpu
-    integer :: j, i
-    integer, parameter :: prec = 4 
-    integer, parameter :: intkind = 4
-
     !input data
-    real(kind=prec), allocatable :: L(:)
-    real(kind=prec), allocatable :: x(:), y(:), z(:)
-    real(kind=prec), allocatable :: points(:,:)
-    integer(kind=intkind) :: n
-    
-    !tree results
-    type(KDTreeNode), pointer :: root
-    type(KDTreeResult) :: query
-    integer(kind=intkind), allocatable :: indices(:)
-    real(kind=prec), allocatable :: dist(:)
-
+    integer :: n, i, k, ndim
+    real, allocatable :: x(:), y(:), z(:)
+    integer, allocatable :: ninputs(:)
+    integer, allocatable :: exps(:)
+    character(10) :: exp_str
+  
     !time
     integer*8 :: t1, t2, trate, tmax
-
-    !queries
-    real(kind=prec), allocatable :: ttarget(:,:)
-    real(kind=prec) :: ball_radius
-    integer :: k, nquery, ninside
+    real*4, allocatable :: times(:), means(:), stds(:)
+    real*4 :: mean, std
+    integer ::  nbuild
 
     !file bigger than 2GB
     integer :: npart_save
@@ -46,128 +31,97 @@ program main
 
     !coretran
     TYPE(KDTREE) :: tree_coretran
-    REAL(R64), ALLOCATABLE :: x_coretran(:), y_coretran(:), z_coretran(:)
-    !query
-    TYPE (KDTREESEARCH) :: SEARCH
-    TYPE (DARGDYNAMICARRAY) :: DA
+    REAL(R64), ALLOCATABLE :: xtree(:), ytree(:), ztree(:)
 
-    ! Get the number of threads
-    !$OMP PARALLEL
-      !$OMP SINGLE
-    ncpu = omp_get_num_threads()
-      !$OMP END SINGLE
-    !$OMP END PARALLEL
-    print *, "Number of threads:", ncpu
+    ! Set the number of dimensions
+    ndim = 3
+    nbuild = 5
+    allocate(ninputs(4))
+    allocate(means(4))
+    allocate(stds(4))
+    allocate(exps(4))
+    exps = [6, 7, 8, 9]  ! Corresponding to 10^6, 10^7, 10^8, 10^9
+    ninputs(1) = 1000000
+    ninputs(2) = 10000000
+    ninputs(3) = 100000000
+    ninputs(4) = 1000000000
+    means = 0.0
+    stds = 0.0
 
-    ! ! Read input data (FILE bigger than 2GB)
-    ! n = 1000000000
-    ! nsaves = 10
-    ! nchecker = 0
-    ! call system_clock(t1,trate,tmax)
-    ! allocate(x(n), y(n), z(n))
-    ! do i=1, nsaves
-    !   write(ifile, '(I0)') i-1
-    !   write(*,*) "Reading file:", trim('input/points_9_'//ifile//'.dat')
-    !   open(unit=10, file=trim('input/points_9_'//ifile//'.dat'), form = 'unformatted')
-    !   read(10) npart_save
-    !   nchecker = nchecker + npart_save
-    !   read(10) x((i-1)*npart_save+1:i*npart_save)
-    !   read(10) y((i-1)*npart_save+1:i*npart_save)
-    !   read(10) z((i-1)*npart_save+1:i*npart_save)
-    !   close(10)
-    ! enddo
-    ! call system_clock(t2,trate,tmax)
-    ! WRITE(*,*) "Time taken to read points:", float(t2 - t1)/float(trate), "seconds"
-    ! WRITE(*,*) "Number of points:", n, nchecker
-    ! WRITE(*,*) minval(x), maxval(x)
-    ! WRITE(*,*) minval(y), maxval(y)
-    ! WRITE(*,*) minval(z), maxval(z)
+    !file bigger than 2GB
+    nsaves = 10
+    !!!!!!!!!!!!!!!!!!!!!!!
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    do k = 1, size(ninputs)
+      n = ninputs(k)
+      allocate(x(n), y(n), z(n))
+      print *, "Building KD-Tree with ", n, " points."
+      write(exp_str, '(I0)') exps(k)
+      if (n .lt. 1000000000) then
+        open(unit=10, file='../../../../benchmark/examples/points_'&
+            // trim(adjustl(exp_str)) // '.dat', &
+              form = 'unformatted')
 
-    ! Read input data
-    call system_clock(t1,trate,tmax)
-    open(unit=10, file='input/points.dat', form = 'unformatted')
-    read(10) n
-    allocate(x(n), y(n), z(n))
-    read(10) x
-    read(10) y
-    read(10) z
-    close(10)
-    call system_clock(t2,trate,tmax)
-    ! WRITE(*,*) "Time taken to read points:", float(t2 - t1)/float(trate), "seconds"
-    ! WRITE(*,*) "Number of points:", n
+        ! random uniform points in a cube of size L
+        read(10) !n
+        read(10) x
+        read(10) y
+        read(10) z
+        close(10)
+      else 
+        nchecker = 0
+        do i = 1, nsaves
+          write(ifile, '(I0)') i-1
+          open(unit=10, file=trim('../../../../benchmark/examples&
+                             &/points_'// trim(adjustl(exp_str))//'_'//ifile//'.dat'), form = 'unformatted')
+          read(10) npart_save
+          nchecker = nchecker + npart_save
+          read(10) x((i-1)*npart_save+1:i*npart_save)
+          read(10) y((i-1)*npart_save+1:i*npart_save)
+          read(10) z((i-1)*npart_save+1:i*npart_save)
+          close(10)
+        end do
+      end if
 
-    allocate(points(n,3))
-    points(:,1) = x
-    points(:,2) = y
-    points(:,3) = z
+      call allocate(xtree, n)
+      call allocate(ytree, n)
+      call allocate(ztree, n)
+      xtree = x
+      ytree = y
+      ztree = z
 
-    ! Build the KD-Tree
-    call system_clock(t1,trate,tmax)
-    root => build_kdtree(points)
-    call system_clock(t2,trate,tmax)
-    WRITE(*,*) "Time taken to build KD-Tree:", float(t2 - t1)/float(trate), "seconds"
-
-    ! ! Build the KD-Tree coretran
-    ! x_coretran = x
-    ! y_coretran = y
-    ! z_coretran = z
-    ! call system_clock(t1,trate,tmax)
-    ! tree_coretran = KDTREE(x_coretran, y_coretran, z_coretran)
-    ! call system_clock(t2,trate,tmax)
-    ! WRITE(*,*) "CORETRAN Time taken to build KD-Tree:", float(t2 - t1)/float(trate), "seconds"
-
-    ! QUERIES
-    allocate(L(3))
-    L = 100.
-    nquery = 1000
-    allocate(ttarget(nquery,3))
-    do j = 1, 3 
-      do i = 1, nquery
-        ttarget(i,j) = rand() * L(j)  ! Random target point
+      ! Build the KD-Tree and time it
+      allocate(times(nbuild))  
+      do i = 1, nbuild
+        write(*,*) " Build iteration ", i, " of ", nbuild
+        call system_clock(t1,trate,tmax)
+        tree_coretran = KDTREE(xtree, ytree, ztree)
+        call system_clock(t2,trate,tmax)
+        times(i) = float(t2 - t1)/float(trate)
+        call tree_coretran%deallocate()
       end do
+      
+      mean = sum(times)/real(nbuild)
+      std = sqrt(sum((times - mean)**2)/real(nbuild))
+
+      means(k) = mean
+      stds(k) = std
+      
+      deallocate(times)
+      deallocate(x,y,z)
+      deallocate(xtree, ytree, ztree)
     end do
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    ! knn-search 
-    k = 1
-    call system_clock(t1,trate,tmax)
-    do i = 1, nquery
-      query = knn_search(root, ttarget(i,:), k)
+    ! Save results to a file
+    open(unit=10, file='../../../../benchmark/inhomo_coretran_build_times.txt', status='replace')
+    write(10,*) 'N_points  Mean_time(s)  Std_dev(s)'
+    do k = 1, size(ninputs)
+      write(10,*) ninputs(k), means(k), stds(k)
     end do
-    call system_clock(t2,trate,tmax)
-    WRITE(*,*) "Time taken to find nearests neighbors:", float(t2 - t1)/float(trate)/float(nquery), "seconds"
-
-    ! !CORETRAN KNN TEST
-    ! call system_clock(t1,trate,tmax)
-    ! do i = 1, nquery
-    !   DA = SEARCH%KNEAREST(tree_coretran, x_coretran, y_coretran, z_coretran, &
-    !           XQUERY=DBLE(ttarget(i,1)), YQUERY=DBLE(ttarget(i,2)),  &
-    !           ZQUERY=DBLE(ttarget(i,3)), K=k)
-    ! end do
-    ! call system_clock(t2,trate,tmax)
-    ! WRITE(*,*) "CORETRAN Time taken to find nearests neighbors:", float(t2 - t1)/float(trate)/float(nquery), "seconds"
-
-    ! ! ball-search
-    ! ball_radius = 0.01
-    ! call system_clock(t1,trate,tmax)
-    ! do i = 1, nquery
-    !   query = ball_search(root, ttarget, ball_radius)
-    ! end do
-    ! call system_clock(t2,trate,tmax)
-    ! WRITE(*,*) "Time taken to find points in ball:", float(t2 - t1)/float(trate)/float(nquery), "seconds"
-    
-    ! !CORETRAN BALL TEST
-    ! call system_clock(t1,trate,tmax)
-    ! do i=1, nquery
-    !   DA = SEARCH%KNEAREST(tree_coretran, x_coretran, y_coretran, z_coretran, &
-    !             XQUERY=DBLE(ttarget(i,1)), YQUERY=DBLE(ttarget(i,2)),  &
-    !             ZQUERY=DBLE(ttarget(i,3)), RADIUS=DBLE(ball_radius))  
-    ! end do
-    ! call system_clock(t2,trate,tmax)
-    ! WRITE(*,*) "CORETRAN Time taken to find points within the ball:", float(t2 - t1)/float(trate)/float(nquery), "seconds"
-
-    ! Deallocate memory
-    deallocate(x, y, z)
-    deallocate(points)
-    deallocate(root)
+    close(10)
+    deallocate(ninputs)
+    deallocate(means)
+    deallocate(stds)  
 
 end program main
