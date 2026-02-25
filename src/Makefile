@@ -64,13 +64,18 @@ $(MOD_OBJ): $(MOD_SRC) | $(BINDIR)
 #### #### #### #### #### #### #### #### #### #### #### #### #### #### #### 
 
 #new: meson friendly. works for python3.7-3.13+
-python: $(MOD_SRC) $(PYMOD_SRC)
-	$(info Building Python module $(PYMOD_NAME) ...)
+
+LIB = $(BINDIR)/lib$(NAME).a
+
+$(LIB): $(MOD_OBJ)
+	ar rcs $(LIB) $(MOD_OBJ)
+
+python: $(LIB) $(PYMOD_SRC)
 	f2py --f90flags='$(FFLAGS) -I$(PWD)/$(BINDIR)' \
-		-lgomp \
-		-c -m $(PYMOD_NAME) \
-		$(PWD)/$(MOD_OBJ) \
-		$(PYMOD_SRC)
+	     -c -m $(PYMOD_NAME) \
+	     $(PYMOD_SRC) \
+	     -L$(PWD)/$(BINDIR) -l$(NAME) \
+	     -lgomp
 
 # Ensure bin/ exists
 $(BINDIR):
