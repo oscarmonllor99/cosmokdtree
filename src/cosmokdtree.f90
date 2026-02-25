@@ -1,8 +1,8 @@
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ! cosmokdtree module
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-! GRUP DE COSMOLOGIA COMPUTACIONAL (GCC) UNIVERSITAT DE VALÈNCIA
-! Authors: Óscar Monllor Berbegal and David Vallés Pérez
+! GRUP DE COSMOLOGIA COMPUTACIONAL (GCC) UNIVERSITAT DE VALENCIA
+! Authors: Oscar Monllor Berbegal and David Valles Perez
 ! Date: Genuary 30th 2025
 ! Last update: December 5th 2025
 !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

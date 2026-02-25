@@ -30,11 +30,12 @@ def build_kdtree(points, leaf=None, boxsize=None):
     return tree
 
 #deallocation
-def deallocate_tree(tree):
+def deallocate_kdtree(tree):
     pycosmokdtree.pycosmokdtree.pydeallocate_tree(tree)
 
 #knn search
 def knn_search(tree, target, k, sorted = True):
+    assert type(k) in [int, np.int32, np.int64], "k must be an integer"
     target = np.array(target, dtype=np.float64)
     dist, idx = pycosmokdtree.pycosmokdtree.pyknn_search(tree, target, k, sorted)
     idx -= 1 #convert to 0-based indexing
@@ -42,6 +43,8 @@ def knn_search(tree, target, k, sorted = True):
 
 #ball search
 def ball_search(tree, target, radius, sorted = False):
+    assert radius > 0., "Radius must be a positive number"
+    radius = float(radius)
     target = np.array(target, dtype=np.float64)
     nball, query = pycosmokdtree.pycosmokdtree.pyball_search_call_1(tree, target, radius, sorted)
     dist, idx = pycosmokdtree.pycosmokdtree.pyball_search_call_2(query, nball)

@@ -163,7 +163,7 @@ contains
         call c_f_pointer(temp_c_ptr, tree)
 
         allocate(query)
-        query = ball_search(tree, targett, radius)
+        query = ball_search(tree, targett, radius, sorted)
     
         nball = size(query%idx)
 

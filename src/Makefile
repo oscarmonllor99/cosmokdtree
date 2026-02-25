@@ -26,8 +26,9 @@ endif
 
 # Fortran flags
 FC = gfortran
-## FFLAGS = -cpp -O0 -g -mcmodel=medium -fopenmp -march=native -fcheck=all -fbounds-check -fbacktrace -ffpe-trap=invalid,zero,overflow
-FFLAGS = -cpp -O3 -g -fopenmp -mieee-fp -ftree-vectorize -funroll-loops -march=native -mcmodel=medium
+##FFLAGS = -cpp -O0 -g -Wimplicit-interface -Werror -mcmodel=medium -fopenmp -march=native -fcheck=all -fbounds-check -fbacktrace -ffpe-trap=invalid,zero,overflow
+FFLAGS = -cpp -O3 -g -fopenmp -ftree-vectorize -funroll-loops -march=native -mcmodel=medium
+##FFLAGS = -cpp -O0 -march=native 
 FFLAGS += -Dperiodic=$(PERIODIC) -Dlongint=$(LONGINT) -Ddoubleprecision=$(DOUBLEPRECISION) -Ddimen=$(DIMEN) 
 
 #sources and .o .mod
@@ -55,10 +56,21 @@ $(MOD_OBJ): $(MOD_SRC) | $(BINDIR)
 	$(info Compiling $(MOD_SRC) to $(MOD_OBJ) ...)
 	$(FC) $(FFLAGS) -J $(BINDIR) -c -o $(MOD_OBJ) $(MOD_SRC)
 
+#### THIS PART WORKS ONLY FOR python3.11 or below. #### #### #### #### 
 # Compile the Python wrapper using f2py
-python: $(MOD_OBJ) $(PYMOD_SRC)
+# python: $(MOD_OBJ) $(PYMOD_SRC)
+# 	$(info Building Python module $(PYMOD_NAME) ...)
+#     f2py --f90flags='$(FFLAGS) -I$(PWD)/$(BINDIR)' -lgomp -c -m $(PYMOD_NAME) $(MOD_OBJ) $(PYMOD_SRC)
+#### #### #### #### #### #### #### #### #### #### #### #### #### #### #### 
+
+#new: meson friendly. works for python3.7-3.13+
+python: $(MOD_SRC) $(PYMOD_SRC)
 	$(info Building Python module $(PYMOD_NAME) ...)
-	f2py --f90flags='$(FFLAGS) -I$(PWD)/$(BINDIR)' -c -m $(PYMOD_NAME) $(MOD_OBJ) $(PYMOD_SRC)
+	f2py --f90flags='$(FFLAGS) -I$(PWD)/$(BINDIR)' \
+		-lgomp \
+		-c -m $(PYMOD_NAME) \
+		$(PWD)/$(MOD_OBJ) \
+		$(PYMOD_SRC)
 
 # Ensure bin/ exists
 $(BINDIR):
