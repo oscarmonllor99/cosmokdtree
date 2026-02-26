@@ -24,9 +24,10 @@ contains
 
 
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    ! BUILDING FUNCTION
+    ! BUILDING FUNCTION (PARALLEL)
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     subroutine pybuild_kdtree(points, leaf, boxsize, c_ptr_tree)
+        use omp_lib
         implicit none
         !in
         real*8, intent(in) :: points(:,:)
@@ -97,26 +98,30 @@ contains
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    ! KNN SEARCH
+    ! KNN SEARCH IN PARALLEL
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    subroutine pyknn_search(c_ptr_tree, targett, k, sorted, dist, idx)
+    subroutine pyknn_search(c_ptr_tree, targett, ndim, ntar, k, sorted, dist, idx)
+        use omp_lib
         implicit none
         !in
         integer*8, intent(in) :: c_ptr_tree
-        real*8, intent(in) :: targett(:)
-        integer, intent(in) :: k
+        integer, intent(in) :: ntar, k, ndim
+        real*8, intent(in) :: targett(ntar,ndim)
         logical, intent(in) :: sorted
         !out
-        real*8, intent(out) :: dist(k)
-        integer*8, intent(out) :: idx(k)
+        real*8, intent(out) :: dist(ntar,k)
+        integer*8, intent(out) :: idx(ntar,k)
         !local
+        integer :: i
         type(KDTreeResult) :: query
         type(KDTreeNode), pointer :: tree
         type(c_ptr) :: temp_c_ptr
 
-        !f2py intent(in) :: c_ptr_tree, targett, k, sorted
+        !f2py intent(in) :: ndim, ntar, k
+        !f2py intent(in) :: c_ptr_tree, targett, sorted
         !f2py intent(out) :: dist, idx
-        !f2py depend(k) :: dist, idx
+        !f2py depend(ntar,k) :: dist, idx
+        !f2py depend(ntar,ndim) :: targett
 
         !to c pointer from integer representation
         temp_c_ptr = transfer(c_ptr_tree, temp_c_ptr)
@@ -124,10 +129,16 @@ contains
         !to fortran pointer from c pointer
         call c_f_pointer(temp_c_ptr, tree)
 
-        query = knn_search(tree, targett, k, sorted)
+        !$omp parallel shared(tree, targett, k, dist, idx) private(i, query)
+        !$omp do
+        do i = 1, ntar
+             query = knn_search(tree, targett(i,:), k, sorted)
+             dist(i,:) = query%dist
+             idx(i,:) = query%idx
+        enddo
+        !$omp end do
+        !$omp end parallel
 
-        dist = query%dist
-        idx = query%idx
     end subroutine pyknn_search
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -138,23 +149,30 @@ contains
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     ! BALL SEARCH
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    subroutine pyball_search_call_1(c_ptr_tree, targett, radius, sorted, nball, c_ptr_query)
+    subroutine pyball_search_call_1(c_ptr_tree, targett, ndim, ntar, radius, sorted, &
+                                    nball, nballmax, c_ptr_query)
+        use omp_lib 
         implicit none
         !in
+        integer, intent(in) :: ndim, ntar
         integer*8, intent(in) :: c_ptr_tree
-        real*8, intent(in) :: targett(:)
+        real*8, intent(in) :: targett(ntar,ndim)
         real*8, intent(in) :: radius
         logical, intent(in) :: sorted
         !out
-        integer, intent(out) :: nball
-        integer*8, intent(out) :: c_ptr_query
+        integer :: i
+        integer, intent(out) :: nballmax, nball(ntar)
+        integer*8, intent(out) :: c_ptr_query(ntar)
         !local
         type(KDTreeResult), pointer :: query
         type(KDTreeNode), pointer :: tree
         type(c_ptr) :: temp_c_ptr
 
-        !f2py intent(in) :: c_ptr_tree, target, radius, sorted
-        !f2py intent(out) :: nball, c_ptr_query
+        !f2py intent(in) :: ndim, ntar
+        !f2py intent(in) :: c_ptr_tree, targett, radius, sorted
+        !f2py intent(out) :: nball, nballmax, c_ptr_query
+        !f2py depend(ntar) :: nball, c_ptr_query
+        !f2py depend(ntar,ndim) :: targett
 
         !to c pointer from integer representation
         temp_c_ptr = transfer(c_ptr_tree, temp_c_ptr)
@@ -162,44 +180,66 @@ contains
         !to fortran pointer from c pointer
         call c_f_pointer(temp_c_ptr, tree)
 
-        allocate(query)
-        query = ball_search(tree, targett, radius, sorted)
-    
-        nball = size(query%idx)
+        !$omp parallel shared(ntar, tree, targett, radius, sorted, nball, c_ptr_query) &
+        !$omp private(i, query, temp_c_ptr)
+        !$omp do
+        do i = 1, ntar
+            allocate(query)
+            query = ball_search(tree, targett(i,:), radius, sorted)
+            nball(i) = size(query%idx)
 
-        !opaque pointer to pass to python
-        temp_c_ptr = c_loc(query)
-        c_ptr_query = transfer(temp_c_ptr, c_ptr_query)
+            !opaque pointer to pass to python
+            temp_c_ptr = c_loc(query)
+            c_ptr_query(i) = transfer(temp_c_ptr, c_ptr_query(i))
+        enddo
+        !$omp end do
+        !$omp end parallel
+
+        nballmax = maxval(nball)
 
     end subroutine pyball_search_call_1
 
-    subroutine pyball_search_call_2(c_ptr_query, nball, dist, idx)
+    subroutine pyball_search_call_2(ndim, ntar, c_ptr_query, nballmax, nball, dist, idx)
         implicit none
         !in
-        integer*8, intent(in) :: c_ptr_query
-        integer, intent(in) :: nball
+        integer*8, intent(in) :: c_ptr_query(ntar)
+        integer, intent(in) :: nball(ntar)
+        integer, intent(in) :: ndim, ntar, nballmax
         !out
-        real*8, intent(out) :: dist(nball)
-        integer*8, intent(out) :: idx(nball)
+        real*8, intent(out) :: dist(ntar, nballmax)
+        integer*8, intent(out) :: idx(ntar, nballmax)
         !local
+        integer :: i
         type(KDTreeResult), pointer :: query
         type(c_ptr) :: temp_c_ptr
 
-        !f2py intent(in) :: c_ptr_query, nball
+        !f2py intent(in) :: c_ptr_query, nball, ndim, ntar, nballmax
         !f2py intent(out) :: dist, idx
-        !f2py depend(nball) :: dist, idx
+        !f2py depend(ntar, nballmax) :: dist, idx
+        !f2py depend(ntar) :: nball, c_ptr_query
 
-        !to c pointer from integer representation
-        temp_c_ptr = transfer(c_ptr_query, temp_c_ptr)
-        
-        !to fortran pointer from c pointer
-        call c_f_pointer(temp_c_ptr, query)
+        !$omp parallel shared(c_ptr_query, nball, dist, idx) private(i, query, temp_c_ptr)
+        !$omp do
+        do i = 1, ntar
+            if (nball(i) > 0) then
+                !to c pointer from integer representation
+                temp_c_ptr = transfer(c_ptr_query(i), temp_c_ptr)
 
-        dist = query%dist
-        idx = query%idx
+                !to fortran pointer from c pointer
+                call c_f_pointer(temp_c_ptr, query)
 
-        !deallocate query
-        deallocate(query)
+                dist(i,1:nball(i)) = query%dist
+                idx(i,1:nball(i)) = query%idx
+
+                !deallocate query
+                deallocate(query)
+            else
+                dist(i,:) = 0.
+                idx(i,:) = 0
+            endif
+        enddo
+        !$omp end do
+        !$omp end parallel
         
     end subroutine pyball_search_call_2
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
