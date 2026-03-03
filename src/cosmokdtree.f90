@@ -53,7 +53,7 @@ module cosmokdtree
     private  
     public :: build_kdtree, deallocate_kdtree, & 
               knn_search, ball_search, box_search, &
-              KDTreeNode, KDTreeResult
+              KDTreeNode, KDTreeResult, deallocate_query
 
     !+++++++++++++++++++++++++++++++
     !++++ Dimensionality (default 3D)
@@ -1490,6 +1490,19 @@ contains
     end subroutine add_to_list
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ! Query destructor to free the memory of the results
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    subroutine deallocate_query(query)
+        implicit none
+        type(KDTreeResult), intent(inout) :: query
+
+        if (allocated(query%idx)) deallocate(query%idx)
+        if (allocated(query%dist)) deallocate(query%dist)
+
+    end subroutine deallocate_query
+    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ! Euclidean distance between two points (Minkowski p=2)

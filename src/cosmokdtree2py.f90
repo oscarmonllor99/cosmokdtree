@@ -135,6 +135,7 @@ contains
              query = knn_search(tree, targett(i,:), k, sorted)
              dist(i,:) = query%dist
              idx(i,:) = query%idx
+             call deallocate_query(query)
         enddo
         !$omp end do
         !$omp end parallel
@@ -231,8 +232,8 @@ contains
                 dist(i,1:nball(i)) = query%dist
                 idx(i,1:nball(i)) = query%idx
 
-                !deallocate query
-                deallocate(query)
+                !deallocate query to avoid memory leaks
+                call deallocate_query(query)
             else
                 dist(i,:) = 0.
                 idx(i,:) = 0
@@ -240,6 +241,7 @@ contains
         enddo
         !$omp end do
         !$omp end parallel
+        
         
     end subroutine pyball_search_call_2
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -308,10 +310,9 @@ contains
         idx = query%idx
 
         !deallocate query
-        deallocate(query)
+        call deallocate_query(query)
 
     end subroutine pybox_search_call_2
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 
 end module pycosmokdtree
