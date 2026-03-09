@@ -27,6 +27,9 @@ def build_kdtree(points, leaf=None, boxsize=None):
 
     boxsize = np.array(boxsize, dtype=np.float64)
 
+    #points to fortran-contigous
+    points = np.asfortranarray(points, dtype=np.float64)
+
     tree = pycosmokdtree.pycosmokdtree.pybuild_kdtree(points, leaf, boxsize)
     return tree
 
