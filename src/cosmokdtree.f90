@@ -92,7 +92,7 @@ module cosmokdtree
     !+++++++++++++++++++++++++++++++
     type :: KDTreeNode
         !basic ---------------------
-        real(kind=prec) :: point(ndim) !splitting point coordinates
+        real(kind=prec) :: point !splitting point coordinates
         integer :: axis !splitting axis (1 for x, 2 for y, 3 for z, 4 for w, ...)
         type(KDTreeNode), pointer :: left => null()  !left child node
         type(KDTreeNode), pointer :: right => null() !right child node
@@ -817,7 +817,7 @@ contains
 
             axis = node%axis
             ! 1D distance from target to the splitting plane
-            d1d = targett(axis) - node%point(axis)
+            d1d = targett(axis) - node%point
 
             ! Recursively search the subtree that contains the target
             if (d1d < 0) then
@@ -1181,7 +1181,7 @@ contains
         else
             axis = node%axis
             ! 1D distance from target to the splitting plane
-            d1d = targett(axis) - node%point(axis)
+            d1d = targett(axis) - node%point
             ! Recursively search the subtree that contains the target
             if (d1d < 0) then
                 call ball_search_recursive_hyperp(node%left, targett, dist, idx, count, radius)
@@ -1267,7 +1267,6 @@ contains
         integer(kind=intkind), allocatable, intent(inout) :: idx(:) 
         integer, intent(inout) :: count_idx
         !local
-        real(kind=prec) :: split_value(ndim)
         integer :: i
         logical :: in_box
         integer :: axis
@@ -1291,15 +1290,14 @@ contains
 
         else
 
-            split_value = node%point
             axis = node%axis
 
             ! Recursively search the subtrees intersecting the box
-            if (box(2*axis-1) < split_value(axis)) then
+            if (box(2*axis-1) < node%point) then
                 call box_search_recursive(node%left, idx, box, count_idx)
             endif
 
-            if (box(2*axis) > split_value(axis)) then
+            if (box(2*axis) > node%point) then
                 call box_search_recursive(node%right, idx, box, count_idx)
             endif
 
